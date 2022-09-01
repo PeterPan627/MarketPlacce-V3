@@ -36,6 +36,17 @@ pub enum ContractError {
     #[error("Wrong Collection")]
     WrongCollection {},
 
+    #[error("Wrong Coin Denom")]
+    WrongCoinDenom {},
+
+    #[error("Wrong Cofiguration")]
+    WrongConfig {},
+
+    #[error("There is no ask for this token_id")]
+    NoSuchAsk {},
+
+    #[error("This ask is expired")]
+    AskExpired {},
 
     #[error("Escrow not expired")]
     NotExpired {},

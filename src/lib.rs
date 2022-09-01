@@ -4,3 +4,4 @@ pub mod msg;
 pub mod state;
 pub mod asset;
 pub mod package;
+pub mod query;
