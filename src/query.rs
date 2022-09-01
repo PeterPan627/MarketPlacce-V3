@@ -1,5 +1,5 @@
 use crate::msg::{
-    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg,
+    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid,
 };
 use crate::state::{
     ask_key, asks, bid_key, bids,  BidKey, State, CONFIG, CollectionInfo, COLLECTIONINFO,TVL, TvlInfo, SaleInfo, SALEHISTORY, MEMBERS, UserInfo
@@ -105,6 +105,25 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             start_after,
             limit,
         )?),
+        QueryMsg::BidsByBidderSortedByExpiration {
+            bidder,
+            start_after,
+            limit,
+        } => to_binary(&query_bids_by_bidder_sorted_by_expiry(
+            deps,
+            bidder,
+            start_after,
+            limit,
+        )?),
+        QueryMsg::BidsBySeller {
+           seller,
+           start_after,
+           limit }  => to_binary(&query_bids_by_seller(
+            deps,
+            seller,
+            start_after,
+            limit,
+        )?)
     }
 }
 
@@ -329,6 +348,71 @@ pub fn query_bids(
         .range(deps.storage, start, None, Order::Ascending)
         .take(limit)
         .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(BidsResponse { bids })
+}
+
+pub fn query_bids_by_bidder_sorted_by_expiry(
+    deps: Deps,
+    bidder: String,
+    start_after: Option<CollectionOffset>,
+    limit: Option<u32>,
+) -> StdResult<BidsResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let start = match start_after {
+        Some(offset) => {
+            deps.api.addr_validate(&offset.collection)?;
+            let collection = offset.collection;
+            let bid = query_bid(deps, collection.clone(), offset.token_id.clone(), bidder.clone())?;
+            match bid.bid {
+                Some(bid) => Some(Bound::exclusive((
+                    bid.expires_at.seconds(),
+                    bid_key(&collection, &offset.token_id, &bidder),
+                ))),
+                None => None,
+            }
+        }
+        None => None,
+    };
+
+    let bids = bids()
+        .idx
+        .bidder_expires_at
+        .sub_prefix(bidder)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(BidsResponse { bids })
+}
+
+
+pub fn query_bids_by_seller(
+    deps: Deps,
+    seller: String,
+    start_after: Option<CollectionOffsetBid>,
+    limit: Option<u32>,
+) -> StdResult<BidsResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let start = if let Some(start) = start_after {
+        deps.api.addr_validate(&start.collection)?;
+        let collection = start.collection;
+        Some(Bound::exclusive(bid_key(&collection, &start.token_id, &start.bidder)))
+    } else {
+        None
+    };
+
+    let bids = bids()
+        .idx
+        .seller
+        .prefix(seller)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|res| res.map(|item| item.1))
         .collect::<StdResult<Vec<_>>>()?;
 
     Ok(BidsResponse { bids })

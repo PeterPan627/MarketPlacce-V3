@@ -28,7 +28,8 @@ pub enum ExecuteMsg {
  SetOfferings{address:String,offering:Vec<QueryOfferingsResult>},
  SetTvl{address:String,tvl:Vec<TvlInfo>},
  Migrate{address:String,dest:String,token_id : Vec<String>},
- SetSaleHistory{address:String,history:Vec<SaleInfo>}
+ SetSaleHistory{address:String,history:Vec<SaleInfo>},
+ SetBidLimit{bid_limit:u32}
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -46,6 +47,7 @@ pub enum QueryMsg {
     Ask{collection:String, token_id:String},
     /// Get all asks for a collection
     /// Return type: `AsksResponse`
+    //start_after is  token_id
     Asks {
         collection: String,
         start_after: Option<String>,
@@ -84,10 +86,23 @@ pub enum QueryMsg {
     },
       /// Get all bids for a specific NFT
     /// Return type: `BidsResponse`
+    /// start after is bidder
     Bids {
         collection: String,
         token_id: String,
         start_after: Option<String>,
+        limit: Option<u32>,
+    },
+    BidsByBidderSortedByExpiration {
+        bidder: String,
+        start_after: Option<CollectionOffset>,
+        limit: Option<u32>,
+    },
+     /// Get all bids by a bidder
+    /// Return type: `BidsResponse`
+    BidsBySeller {
+        seller: String,
+        start_after: Option<CollectionOffsetBid>,
         limit: Option<u32>,
     },
 }
@@ -97,6 +112,15 @@ pub enum QueryMsg {
 pub struct CollectionOffset {
     pub collection: String,
     pub token_id: String,
+}
+
+
+/// Offset for collection pagination bid by seller
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CollectionOffsetBid {
+    pub collection: String,
+    pub token_id: String,
+    pub bidder: String
 }
 
 

@@ -13,7 +13,8 @@ pub const TVL:Map<(&str,&str),Uint128> = Map::new("tvl_config");
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
-    pub owner:String,
+    pub owner: String,
+    pub bid_limit: u32
 }
 
 
@@ -103,6 +104,8 @@ pub struct BidIndicies<'a> {
     pub collection_token_id: MultiIndex<'a, (String, String), Bid, BidKey>,
     pub bidder: MultiIndex<'a, String, Bid, BidKey>,
     pub seller: MultiIndex<'a, String, Bid, BidKey>,
+     // Cannot include `Timestamp` in index, converted `Timestamp` to `seconds` and stored as `u64`
+    pub bidder_expires_at: MultiIndex<'a, (String, u64), Bid, BidKey>,
 }
 
 impl<'a> IndexList<Bid> for BidIndicies<'a> {
@@ -112,6 +115,7 @@ impl<'a> IndexList<Bid> for BidIndicies<'a> {
             &self.collection_token_id,
             &self.bidder,
             &self.seller,
+            &self.bidder_expires_at,
         ];
         Box::new(v.into_iter())
     }
@@ -127,6 +131,11 @@ pub fn bids<'a>() -> IndexedMap<'a, BidKey, Bid, BidIndicies<'a>> {
         ),
         bidder: MultiIndex::new(|d: &Bid| d.bidder.clone(), "bids", "bids__bidder"),
         seller: MultiIndex::new(|d: &Bid| d.seller.clone(), "bids", "bids__seller"),
+        bidder_expires_at: MultiIndex::new(
+            |d: &Bid| (d.bidder.clone(), d.expires_at.seconds()),
+            "col_bids",
+            "col_bids__bidder_expires_at",
+        ),   
     };
     IndexedMap::new("bids", indexes)
 }

@@ -48,6 +48,9 @@ pub enum ContractError {
     #[error("This ask is expired")]
     AskExpired {},
 
+     #[error("Bid count is expired now")]
+    BidCountExpired {},
+
     #[error("Escrow not expired")]
     NotExpired {},
 }
