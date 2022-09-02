@@ -1,2 +1,2 @@
-# Prism Integration
-This is the contract for the integration with the Anchor and Luna purchase.
+# MarketPlace Contract
+Our marketplace contract supports the ibc coins of Cosmos ecosystem and well known tokens on the Juno chain.
