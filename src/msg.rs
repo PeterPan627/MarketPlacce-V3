@@ -2,71 +2,95 @@
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::state::{Asset,UserInfo, TvlInfo, SaleInfo, SaleType, Ask, Bid};
+use crate::state::{Asset,UserInfo, TvlInfo, SaleInfo, SaleType, Ask, Bid, CollectionBid};
 use crate::package::QueryOfferingsResult;
-use cosmwasm_std::{Decimal, Timestamp};
+use cosmwasm_std::{Decimal, Timestamp, Uint128};
 use cw721::Cw721ReceiveMsg;
 
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-  pub  owner:String,
+  pub owner: String
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
- ReceiveNft(Cw721ReceiveMsg),
- Receive(Cw20ReceiveMsg),
- SetBidCoin{
-    nft_address:String, 
-    expire: Timestamp, 
-    sale_type: SaleType, 
-    token_id: String, 
-    list_price:Asset
-},
- WithdrawNft{
-    nft_address: String,
-    token_id: String
-},
- ChangeOwner{
-    address:String
-},
- AddTokenAddress{
-    symbol:String,address:String
-},
- AddCollection{
-    royalty_portion:Decimal,
-    members:Vec<UserInfo>,
-    nft_address:String
-},
- UpdateCollection{
-    royalty_portion:Decimal,
-    members:Vec<UserInfo>,
-    nft_address:String
-},
- FixNft{
-    address:String,
-    token_id:String
-},
- SetOfferings{
-    address:String,
-    offering:Vec<QueryOfferingsResult>
-},
- SetTvl{
-    address:String,
-    tvl:Vec<TvlInfo>
-},
- Migrate{
-    address:String,
-    dest:String,
-    token_id : Vec<String>
-},
- SetSaleHistory{
-    address:String,
-    history:Vec<SaleInfo>
-},
- SetBidLimit{bid_limit:u32}
+    ReceiveNft(Cw721ReceiveMsg),
+    WithdrawNft{
+        nft_address: String,
+        token_id: String
+    },
+    UpdateAskPrice{
+        nft_address: String,
+        token_id: String,
+        list_price: Asset,
+        token_address: Option<String>
+    },
+    Receive(Cw20ReceiveMsg), 
+    SetBidCoin{
+        nft_address:String, 
+        expire: Timestamp, 
+        sale_type: SaleType, 
+        token_id: Option<String>, 
+        list_price:Asset
+    },
+    RemoveBid{
+        nft_address: String,
+        token_id: String
+    },
+    AcceptBid{
+        nft_address: String,
+        token_id: String,
+        bidder: String,
+    },
+    RemoveCollectionBid { 
+        nft_address: String 
+    },
+    AcceptCollectionBid {
+        nft_address: String,
+        token_id: String,
+        bidder: String,
+    },
+    /// Priviledged operation to change the active state of an ask when an NFT is transferred
+    ChangeOwner{
+        address:String
+    },
+    AddTokenAddress{
+        symbol:String,address:String
+    },
+    AddCollection{
+        royalty_portion:Decimal,
+        members:Vec<UserInfo>,
+        nft_address:String
+    },
+    UpdateCollection{
+        royalty_portion:Decimal,
+        members:Vec<UserInfo>,
+        nft_address:String
+    },
+    FixNft{
+        address:String,
+        token_id:String
+    },
+    SetOfferings{
+        address:String,
+        offering:Vec<QueryOfferingsResult>
+    },
+    SetTvl{
+        address:String,
+        tvl:Vec<TvlInfo>
+    },
+    Migrate{
+        address:String,
+        dest:String,
+        token_id : Vec<String>
+    },
+    SetSaleHistory{
+        address:String,
+        history:Vec<SaleInfo>
+    },
+    SetBidLimit{bid_limit:u32}
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -139,6 +163,26 @@ pub enum QueryMsg {
         start_after: Option<CollectionOffsetBid>,
         limit: Option<u32>,
     },
+      /// Get data for a specific collection bid
+    /// Return type: `CollectionBidResponse`
+    CollectionBid {
+        collection: String,
+        bidder: String,
+    },
+    /// Get all collection bids by a bidder
+    /// Return type: `CollectionBidsResponse`
+    CollectionBidsByBidder {
+        bidder: String,
+        start_after: Option<CollectionOffset>,
+        limit: Option<u32>,
+    },
+    /// Get all collection bids by a bidder, sorted by expiration
+    /// Return type: `CollectionBidsResponse`
+    CollectionBidsByBidderSortedByExpiration {
+        bidder: String,
+        start_after: Option<CollectionBidOffset>,
+        limit: Option<u32>,
+    },
     SaleHistoryByCollection{
         collection: String,
         start_after: Option<SaleHistoryOffset>,
@@ -185,6 +229,25 @@ pub struct CollectionOffsetBid {
     pub bidder: String
 }
 
+/// Offset for collection bid pagination
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CollectionBidOffset {
+    pub price: Asset,
+    pub collection: String,
+    pub bidder: String,
+}
+
+impl CollectionBidOffset {
+    pub fn new(price: Asset, collection: String, bidder: String) -> Self {
+        CollectionBidOffset {
+            price,
+            collection,
+            bidder,
+        }
+    }
+}
+
+
 
 /// Salehistory offset for the pagination sale histroy by collection
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -209,7 +272,7 @@ pub struct BuyNft {
     pub nft_address : String,
     pub expire: Timestamp,
     pub sale_type: SaleType,
-    pub token_id: String
+    pub token_id: Option<String>
 }
 
 
@@ -253,4 +316,15 @@ pub struct TvlResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TvlIndividualResponse {
     pub tvl: Option<TvlInfo>,
+}
+
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CollectionBidResponse {
+    pub bid: Option<CollectionBid>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CollectionBidsResponse {
+    pub bids: Vec<CollectionBid>,
 }

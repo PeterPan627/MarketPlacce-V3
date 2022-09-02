@@ -1,8 +1,8 @@
 use crate::msg::{
-    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid, SaleHistoryOffset, SaleHistroyResponse, TvlResponse, TvlIndividualResponse,
+    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid, SaleHistoryOffset, SaleHistroyResponse, TvlResponse, TvlIndividualResponse, CollectionBidOffset, CollectionBidResponse, CollectionBidsResponse
 };
 use crate::state::{
-    ask_key, asks, bid_key, bids,  BidKey, State, CONFIG, CollectionInfo, COLLECTIONINFO,TVL, TvlInfo, SaleInfo, MEMBERS, UserInfo, sale_history_key, sale_history, tvl
+    ask_key, asks, bid_key, bids,  BidKey, State, CONFIG, CollectionInfo, COLLECTIONINFO, MEMBERS, UserInfo, sale_history_key, sale_history, tvl,collection_bid_key,collection_bids
 };
 use cosmwasm_std::{entry_point, to_binary, Addr, Binary, Deps, Env, Order, StdResult, Uint128};
 use cw_storage_plus::{Bound, PrefixBound};
@@ -110,6 +110,31 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
          }  => to_binary(&query_bids_by_seller(
             deps,
             seller,
+            start_after,
+            limit,
+        )?),
+        QueryMsg::CollectionBid { collection, bidder } => to_binary(&query_collection_bid(
+            deps,
+            collection,
+            bidder,
+        )?),
+          QueryMsg::CollectionBidsByBidder {
+            bidder,
+            start_after,
+            limit,
+        } => to_binary(&query_collection_bids_by_bidder(
+            deps,
+            bidder,
+            start_after,
+            limit,
+        )?),
+        QueryMsg::CollectionBidsByBidderSortedByExpiration {
+            bidder,
+            start_after,
+            limit,
+        } => to_binary(&query_collection_bids_by_bidder_sorted_by_expiry(
+            deps,
+            bidder,
             start_after,
             limit,
         )?),
@@ -545,4 +570,83 @@ pub fn query_tvl_by_individual(
   let tvl = tvl().may_load(deps.storage, (collection,denom))?;
   
   Ok(TvlIndividualResponse{ tvl })
+}
+
+
+pub fn query_collection_bid(
+    deps: Deps,
+    collection: String,
+    bidder: String,
+) -> StdResult<CollectionBidResponse> {
+    let bid = collection_bids().may_load(deps.storage, collection_bid_key(&collection, &bidder))?;
+
+    Ok(CollectionBidResponse { bid })
+}
+
+
+pub fn query_collection_bids_by_bidder(
+    deps: Deps,
+    bidder: String,
+    start_after: Option<CollectionOffset>,
+    limit: Option<u32>,
+) -> StdResult<CollectionBidsResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+    let start: Option<Bound<(String, String)>> = match start_after {
+        Some(offset) => {
+             deps.api.addr_validate(&offset.collection)?;
+             let collection = offset.collection;
+             Some(Bound::exclusive((collection, bidder.clone())))
+        }
+        None => None,
+    };
+    let bids = collection_bids()
+        .idx
+        .bidder
+        .prefix(bidder)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(CollectionBidsResponse { bids })
+}
+
+pub fn query_collection_bids_by_bidder_sorted_by_expiry(
+    deps: Deps,
+    bidder: String,
+    start_after: Option<CollectionBidOffset>,
+    limit: Option<u32>,
+) -> StdResult<CollectionBidsResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let start = match start_after {
+        Some(offset) => {
+            deps.api.addr_validate(&offset.bidder)?;
+            let bidder = offset.bidder;
+            deps.api.addr_validate(&offset.collection)?;
+            let collection = offset.collection;
+            let collection_bid =
+                query_collection_bid(deps, collection.clone(), bidder.clone())?.bid;
+            let bound = match collection_bid {
+                Some(collection_bid) => Some(Bound::exclusive((
+                    collection_bid.expires_at.seconds(),
+                    (collection, bidder),
+                ))),
+                None => None,
+            };
+            bound
+        }
+        None => None,
+    };
+
+    let bids = collection_bids()
+        .idx
+        .bidder_expires_at
+        .sub_prefix(bidder)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(CollectionBidsResponse { bids })
 }

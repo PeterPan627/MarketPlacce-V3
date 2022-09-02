@@ -233,6 +233,68 @@ pub fn tvl<'a>() -> IndexedMap<'a, TvlKey, TvlInfo, TvlIndicies<'a>> {
     IndexedMap::new("tvl", indexes)
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CollectionBid {
+    pub collection: String,
+    pub bidder: String,
+    pub list_price: Asset,
+    pub expires_at: Timestamp,
+    pub token_address: Option<String>
+}
+
+impl Order for CollectionBid {
+    fn expires_at(&self) -> Timestamp {
+        self.expires_at
+    }
+}
+
+/// Primary key for bids: (collection, bidder)
+pub type CollectionBidKey = (String, String);
+/// Convenience collection bid key constructor
+pub fn collection_bid_key(collection: &String, bidder: &String) -> CollectionBidKey {
+    (collection.clone(), bidder.clone())
+}
+
+/// Defines incides for accessing collection bids
+pub struct CollectionBidIndicies<'a> {
+    pub collection: MultiIndex<'a, String, CollectionBid, CollectionBidKey>,
+    pub bidder: MultiIndex<'a, String, CollectionBid, CollectionBidKey>,
+    // Cannot include `Timestamp` in index, converted `Timestamp` to `seconds` and stored as `u64`
+    pub bidder_expires_at: MultiIndex<'a, (String, u64), CollectionBid, CollectionBidKey>,
+}
+
+impl<'a> IndexList<CollectionBid> for CollectionBidIndicies<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<CollectionBid>> + '_> {
+        let v: Vec<&dyn Index<CollectionBid>> = vec![
+            &self.collection,
+            &self.bidder,
+            &self.bidder_expires_at,
+        ];
+        Box::new(v.into_iter())
+    }
+}
+
+pub fn collection_bids<'a>(
+) -> IndexedMap<'a, CollectionBidKey, CollectionBid, CollectionBidIndicies<'a>> {
+    let indexes = CollectionBidIndicies {
+        collection: MultiIndex::new(
+            |d: &CollectionBid| d.collection.clone(),
+            "col_bids",
+            "col_bids__collection",
+        ),
+        bidder: MultiIndex::new(
+            |d: &CollectionBid| d.bidder.clone(),
+            "col_bids",
+            "col_bids__bidder",
+        ),
+        bidder_expires_at: MultiIndex::new(
+            |d: &CollectionBid| (d.bidder.clone(), d.expires_at.seconds()),
+            "col_bids",
+            "col_bids__bidder_expires_at",
+        ),
+    };
+    IndexedMap::new("col_bids", indexes)
+}
 
 
 
@@ -263,4 +325,5 @@ pub struct CollectionInfo{
 pub enum SaleType {
     FixedPrice,
     Auction,
+    CollectionBid
 }
