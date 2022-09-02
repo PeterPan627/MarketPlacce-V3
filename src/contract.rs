@@ -12,7 +12,7 @@ use cw721::{Cw721ReceiveMsg, Cw721ExecuteMsg};
 use crate::error::{ContractError};
 use crate::msg::{ ExecuteMsg, InstantiateMsg, QueryMsg,SellNft, BuyNft};
 use crate::query::query_bids;
-use crate::state::{State,CONFIG,Asset,UserInfo, MEMBERS,SALEHISTORY,SaleInfo, COLLECTIONINFO, CollectionInfo, TOKENADDRESS, TVL, TvlInfo, COINDENOM, SaleType, };
+use crate::state::{State,CONFIG,Asset,UserInfo, MEMBERS,SaleInfo, COLLECTIONINFO, CollectionInfo, TOKENADDRESS, TVL, TvlInfo, COINDENOM, SaleType, sale_history, sale_history_key, tvl_key, tvl, };
 use crate::state::{Ask,asks,AskKey,ask_key,Order,Bid, bids, BidKey, bid_key};
 use crate::package::{QueryOfferingsResult};
 
@@ -46,21 +46,41 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-    ExecuteMsg::ReceiveNft(msg) =>execute_receive_nft(deps,env,info,msg),
-    ExecuteMsg::Receive(msg) =>execute_receive(deps,env,info,msg),
-    ExecuteMsg::SetBidCoin { nft_address, expire, sale_type, token_id, list_price } => execute_bid_with_coin(deps, env, info, nft_address, token_id, expire, sale_type, list_price),
-    ExecuteMsg::WithdrawNft { offering_id,nft_address } => execute_withdraw(deps,env,info,offering_id,nft_address),
-    ExecuteMsg::AddTokenAddress { symbol, address }  => execute_token_address(deps,env,info,symbol,address),
-    ExecuteMsg::ChangeOwner { address } =>execute_change_owner(deps,env,info,address),
-    ExecuteMsg::AddCollection { royalty_portion, members,nft_address ,offering_id,sale_id} =>execute_add_collection(deps,env,info,royalty_portion,members,nft_address,offering_id,sale_id),
-    ExecuteMsg::UpdateCollection { royalty_portion, members,nft_address } =>execute_update_collection(deps,env,info,royalty_portion,members,nft_address),
-    ExecuteMsg::FixNft{address,token_id} =>execute_fix_nft(deps,env,info,address,token_id),
-    ExecuteMsg::SetOfferings { address, offering }=>execute_set_offerings(deps,env,info,address,offering),
-    ExecuteMsg::SetTvl { address, tvl } =>execute_set_tvl(deps,env,info,address,tvl),
-    ExecuteMsg::Migrate { address, dest, token_id }=>execute_migrate(deps,env,info,address,dest,token_id),
-    ExecuteMsg::SetSaleHistory { address, history }=>execute_history(deps,env,info,address,history),
-    ExecuteMsg::SetBidLimit { bid_limit } => execute_bid_limit(deps,env,info,bid_limit)
-}
+        ExecuteMsg::ReceiveNft(msg) =>execute_receive_nft(deps,env,info,msg),
+        ExecuteMsg::Receive(msg) =>execute_receive(deps,env,info,msg),
+        ExecuteMsg::SetBidCoin { 
+            nft_address, 
+            expire, 
+            sale_type, 
+            token_id, 
+            list_price 
+        } => execute_bid_with_coin(deps, env, info, nft_address, token_id, expire, sale_type, list_price),
+        ExecuteMsg::WithdrawNft {
+            nft_address,
+            token_id 
+        } => execute_withdraw(deps,env,info,nft_address,token_id),
+        ExecuteMsg::AddTokenAddress { symbol, address }  => execute_token_address(deps,env,info,symbol,address),
+        ExecuteMsg::ChangeOwner { address } =>execute_change_owner(deps,env,info,address),
+        ExecuteMsg::AddCollection { 
+            royalty_portion, 
+            members,
+            nft_address ,
+        } =>execute_add_collection(deps,env,info,royalty_portion,members,nft_address),
+        ExecuteMsg::UpdateCollection { 
+            royalty_portion, 
+            members,
+            nft_address 
+        } =>execute_update_collection(deps,env,info,royalty_portion,members,nft_address),
+        ExecuteMsg::FixNft{address,token_id} =>execute_fix_nft(deps,env,info,address,token_id),
+        ExecuteMsg::SetOfferings { address, offering }=>execute_set_offerings(deps,env,info,address,offering),
+        ExecuteMsg::SetTvl { address, tvl } =>execute_set_tvl(deps,env,info,address,tvl),
+        ExecuteMsg::Migrate {
+             address, 
+             dest, 
+             token_id }=>execute_migrate(deps,env,info,address,dest,token_id),
+        ExecuteMsg::SetSaleHistory { address, history }=>execute_history(deps,env,info,address,history),
+        ExecuteMsg::SetBidLimit { bid_limit } => execute_bid_limit(deps,env,info,bid_limit)
+ }
 }
 
 
@@ -265,7 +285,7 @@ fn execute_receive(
                 match bid.token_address{
                     Some(token_address) =>{
                         messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
-                            contract_addr: token_address,
+                            contract_addr: token_address.clone(),
                             msg: to_binary(&Cw20ExecuteMsg::Transfer { 
                                 recipient: bid.bidder.clone(),
                                 amount: bid.list_price.amount })?,
@@ -281,153 +301,35 @@ fn execute_receive(
                 bids().remove(deps.storage, (nft_address.clone(), token_id.clone(), bid.bidder))?;                
             }
 
-            let members = MEMBERS.load(deps.storage,&nft_address)?;
-            //Distribute money to the admins
-            for user in members{
-                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: info.sender.to_string(),
-                        funds: vec![],
-                        msg: to_binary(&Cw20ExecuteMsg::Transfer { 
-                            recipient: user.address.clone(), 
-                            amount: rcv_msg.amount*collection_info.royalty_portion*user.portion })?,
-                }))
-            }
+            update_sale_history_tvl(
+                deps.storage,
+                env,
+                info,
+                existing_ask.seller.clone(),
+                bidder.clone(),
+                nft_address.clone(),
+                token_id.clone(),
+                existing_ask.list_price.clone()
+            )?;
+
+            distribute_money(
+                deps.as_ref(),
+                nft_address, 
+                collection_info.royalty_portion, 
+                existing_ask.seller, 
+                bidder.clone(), 
+                existing_ask.list_price, 
+                Some(token_address), 
+                token_id, 
+                &mut messages
+            )?;
             
-            //Send money to asker
-            messages.push(
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: token_address,
-                funds: vec![],
-                msg: to_binary(&Cw20ExecuteMsg::Transfer { 
-                    recipient: existing_ask.seller, 
-                    amount: rcv_msg.amount*(Decimal::one()-collection_info.royalty_portion) })?,
-                })
-            );
-            
-            //Transfer NFT to bidder
-            messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                 contract_addr: nft_address,
-                 msg: to_binary(&Cw721ExecuteMsg::TransferNft { 
-                    recipient: bidder.clone(),
-                    token_id: token_id })?,
-                 funds: vec![] }));
             Ok(Response::new()
                 .add_attribute("action", "buy Nft as fixed price with token")
                 .add_attribute("bidder", bidder))
         }
     }
 
-    
-//     let off = OFFERINGS.load(deps.storage, (&msg.nft_address,&msg.offering_id))?;
-
-    
-//     if off.list_price.denom != token_symbol{
-//         return Err(ContractError::NotEnoughFunds  { })
-//     }
-
-//     if off.list_price.amount != rcv_msg.amount{
-//         return Err(ContractError::NotEnoughFunds  { })
-//     }
-
-//     let tvl = TVL.may_load(deps.storage, (&msg.nft_address,&off.list_price.denom))?;
-//     let crr_tvl:Uint128;
-//     if tvl == None {
-//         crr_tvl = off.list_price.amount;
-//     }
-//     else {
-//         crr_tvl = tvl.unwrap()+off.list_price.amount;
-//     }
-
-//     TVL.save(deps.storage,( &msg.nft_address,&off.list_price.denom), &crr_tvl)?;
-  
-//     let members = MEMBERS.load(deps.storage,&msg.nft_address)?;
-//     let collection_info = COLLECTIONINFO.may_load(deps.storage, &msg.nft_address)?;
-
-//     if collection_info == None{
-//         return Err(ContractError::WrongNFTContractError {  })
-//     }
-
-//     let collection_info = collection_info.unwrap();
-
-//     if collection_info.offering_id == 1{    
-//           OFFERINGS.remove( deps.storage, (&msg.nft_address,&msg.offering_id));
-//           COLLECTIONINFO.update(deps.storage, &msg.nft_address,
-//              |collection_info|->StdResult<_>{
-//                     let mut collection_info = collection_info.unwrap();
-//                     collection_info.offering_id = 0;
-//                     Ok(collection_info)
-//              })?;
-//     }
-
-//     else{
-//         let crr_offering_id = collection_info.offering_id;
-//         let offering = OFFERINGS.may_load(deps.storage, (&msg.nft_address,&crr_offering_id.to_string()))?;
-        
-//         if offering!=None{
-//             OFFERINGS.save(deps.storage, (&msg.nft_address,&msg.offering_id.to_string()), &offering.unwrap())?;
-           
-//             COLLECTIONINFO.update(deps.storage, &msg.nft_address,
-//                 |collection_info|->StdResult<_>{
-//                         let mut collection_info = collection_info.unwrap();
-//                         collection_info.offering_id =collection_info.offering_id-1;
-//                         Ok(collection_info)
-//                 })?;
-//           OFFERINGS.remove( deps.storage, (&msg.nft_address,&crr_offering_id.to_string()));
-//          }
-
-         
-//     }
-
-//     let mut messages:Vec<CosmosMsg> = vec![];
-//     for user in members{
-//         messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-//                 contract_addr: info.sender.to_string(),
-//                 funds: vec![],
-//                 msg: to_binary(&Cw20ExecuteMsg::Transfer { 
-//                     recipient: user.address.clone(), 
-//                     amount: rcv_msg.amount*collection_info.royalty_portion*user.portion })?,
-//         }))
-//     }
-
-//     let sale_id = collection_info.sale_id+1;
-
-//     SALEHISTORY.save(deps.storage, (&msg.nft_address,&sale_id.to_string()),&SaleInfo { 
-//         from:off.seller.clone(),
-//         to: rcv_msg.sender.to_string(), 
-//         denom: off.list_price.denom,
-//         amount: rcv_msg.amount, 
-//         time: env.block.time.seconds(),
-//         nft_address:msg.nft_address.clone(),
-//         token_id:off.token_id.clone()
-//     })?;
-
-//     COLLECTIONINFO.update(deps.storage, &msg.nft_address, 
-//         |collection_info|->StdResult<_>{
-//             let mut collection_info = collection_info.unwrap();
-//             collection_info.sale_id = sale_id;
-//             Ok(collection_info)
-//         }
-//     )?;
-    
-
-//     Ok(Response::new()
-//         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-//                 contract_addr: msg.nft_address.to_string(),
-//                 funds: vec![],
-//                 msg: to_binary(&Cw721ExecuteMsg::TransferNft {
-//                     recipient: deps.api.addr_validate(&rcv_msg.sender)?.to_string(),
-//                     token_id: off.token_id.clone(),
-//             })?,
-//         }))
-//         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-//                 contract_addr: info.sender.to_string(),
-//                 funds: vec![],
-//                 msg: to_binary(&Cw20ExecuteMsg::Transfer { 
-//                     recipient: off.seller, 
-//                     amount: rcv_msg.amount*(Decimal::one()-collection_info.royalty_portion) })?,
-//         }))
-//         .add_messages(messages)
-// )
 }
 
 fn execute_bid_with_coin(
@@ -578,36 +480,31 @@ fn execute_bid_with_coin(
                 bids().remove(deps.storage, (nft_address.clone(), token_id.clone(), bid.bidder))?;                
             }
 
-            let members = MEMBERS.load(deps.storage,&nft_address)?;
-            //Distribute money to the admins
-            for user in members{
-                messages.push(CosmosMsg::Bank(BankMsg::Send {
-                        to_address: user.address,
-                        amount:vec![Coin{
-                            denom:list_price.denom.clone(),
-                            amount:amount*collection_info.royalty_portion*user.portion
-                        }]
-                }))
-            }
+            update_sale_history_tvl(
+                deps.storage,
+                 env, 
+                 info, 
+                 existing_ask.seller.clone(), 
+                 bidder.clone(), 
+                 nft_address.clone(), 
+                 token_id.clone(), 
+                 existing_ask.list_price.clone()
+            )?;
             
-            //Send money to asker
-            messages.push(
-               CosmosMsg::Bank(BankMsg::Send {
-                    to_address: existing_ask.seller,
-                    amount:vec![Coin{
-                        denom:list_price.denom,
-                        amount:amount*(Decimal::one()-collection_info.royalty_portion)
-                    }]
-                })
-            );
-            
-            //Transfer NFT to bidder
-            messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                 contract_addr: nft_address,
-                 msg: to_binary(&Cw721ExecuteMsg::TransferNft { 
-                    recipient: bidder.clone(),
-                    token_id: token_id })?,
-                 funds: vec![] }));
+
+            distribute_money(
+                deps.as_ref(),
+                nft_address.clone(),
+                collection_info.royalty_portion,
+                existing_ask.seller.clone(),
+                bidder.clone(),
+                 existing_ask.list_price,
+                None,
+                token_id.clone(),
+                & mut messages
+            )?;
+
+           
             
             Ok(Response::new()
                 .add_attribute("action", "buy Nft as fixed price with coin")
@@ -615,171 +512,63 @@ fn execute_bid_with_coin(
         }
     }
 
-//     let off = OFFERINGS.load(deps.storage, (&nft_address, &offering_id))?;
-
-//     let amount= info
-//         .funds
-//         .iter()
-//         .find(|c| c.denom == off.list_price.denom)
-//         .map(|c| Uint128::from(c.amount))
-//         .unwrap_or_else(Uint128::zero);
-
-//     if off.list_price.amount!=amount{
-//         return Err(ContractError::NotEnoughFunds {  })
-//     }
-//     if collection_info.offering_id == 1{    
-//           OFFERINGS.remove( deps.storage, (&nft_address,&offering_id));
-//           COLLECTIONINFO.update(deps.storage, &nft_address,
-//              |collection_info|->StdResult<_>{
-//                     let mut collection_info = collection_info.unwrap();
-//                     collection_info.offering_id = 0;
-//                     Ok(collection_info)
-//              })?;
-//     }
-
-//     else{
-//         let crr_offering_id = collection_info.offering_id;
-//         let offering = OFFERINGS.may_load(deps.storage, (&nft_address,&crr_offering_id.to_string()))?;
-//         if offering!=None{
-//             OFFERINGS.save(deps.storage, (&nft_address,&offering_id.to_string()), &offering.unwrap())?;
-           
-//             COLLECTIONINFO.update(deps.storage, &nft_address,
-//                 |collection_info|->StdResult<_>{
-//                         let mut collection_info = collection_info.unwrap();
-//                         collection_info.offering_id =collection_info.offering_id-1;
-//                         Ok(collection_info)
-//                 })?;
-//         OFFERINGS.remove( deps.storage, (&nft_address,&crr_offering_id.to_string()));
-  
-//          }
-//     }
-    
-//     let members = MEMBERS.load(deps.storage,&nft_address)?;
-    
-//     let mut messages:Vec<CosmosMsg> = vec![];
-//     for user in members{
-//         messages.push(CosmosMsg::Bank(BankMsg::Send {
-//                 to_address: user.address,
-//                 amount:vec![Coin{
-//                     denom:off.clone().list_price.denom,
-//                     amount:amount*collection_info.royalty_portion*user.portion
-//                 }]
-//         }))
-//     }
-    
-//      let sale_id = collection_info.sale_id+1;
-
-//     SALEHISTORY.save(deps.storage, (&nft_address,&sale_id.to_string()),&SaleInfo {
-//          from:off.seller.clone(), 
-//          to: info.sender.to_string(), 
-//          denom: off.list_price.denom.clone(),
-//          amount: amount, 
-//          time: env.block.time.seconds(),
-//          nft_address:nft_address.clone(),
-//          token_id:off.token_id.clone()         
-//         })?;
-
-//     COLLECTIONINFO.update(deps.storage, &nft_address, 
-//         |collection_info|->StdResult<_>{
-//             let mut collection_info = collection_info.unwrap();
-//             collection_info.sale_id = sale_id;
-//             Ok(collection_info)
-//         }
-//     )?;
-
-    
-//     let tvl = TVL.may_load(deps.storage, (&nft_address,&off.list_price.denom))?;
-//     let crr_tvl:Uint128;
-//     if tvl == None {
-//         crr_tvl = off.list_price.amount;
-//     }
-//     else {
-//         crr_tvl = tvl.unwrap()+off.list_price.amount;
-//     }
-
-//     TVL.save(deps.storage,( &nft_address,&off.list_price.denom), &crr_tvl)?;
-
-  
-//     Ok(Response::new()
-//         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-//                 contract_addr: nft_address.to_string(),
-//                 funds: vec![],
-//                 msg: to_binary(&Cw721ExecuteMsg::TransferNft {
-//                     recipient: info.sender.to_string(),
-//                     token_id: off.token_id.clone(),
-//             })?,
-//         }))
-//         .add_message(CosmosMsg::Bank(BankMsg::Send {
-//                 to_address: off.seller,
-//                 amount:vec![Coin{
-//                     denom:off.list_price.denom,
-//                     amount:amount*(Decimal::one()-collection_info.royalty_portion)
-//                 }]
-//         }))
-//         .add_messages(messages)
-// )
 }
 
 fn execute_withdraw(
     deps: DepsMut,
     _env:Env,
     info: MessageInfo,
-    offering_id: String,
-    nft_address:String
+    nft_address: String,
+    token_id:String
 ) -> Result<Response, ContractError> {
-//     let off = OFFERINGS.load(deps.storage,(&nft_address,&offering_id))?;
-//    // let state = CONFIG.load(deps.storage)?;
+    nonpayable(&info)?;
+    let sender = info.sender.to_string();
+    let mut messages :Vec<CosmosMsg> = Vec::new();
 
-//     let collection_info = COLLECTIONINFO.may_load(deps.storage, &nft_address)?;
-//     if collection_info == None{
-//         return Err(ContractError::WrongNFTContractError {  })
-//     }
-//    let collection_info = collection_info.unwrap();
+    let ask_key = ask_key(&nft_address, &token_id);
+    let ask = asks().load(deps.storage, ask_key.clone())?;
+   
+    if ask.seller != sender{
+        return Err(ContractError::Unauthorized {  })
+    }
 
-//    if collection_info.offering_id == 1{    
-//           OFFERINGS.remove( deps.storage, (&nft_address,&offering_id));
-//           COLLECTIONINFO.update(deps.storage, &nft_address,
-//              |collection_info|->StdResult<_>{
-//                     let mut collection_info = collection_info.unwrap();
-//                     collection_info.offering_id = 0;
-//                     Ok(collection_info)
-//              })?;
-//     }
+    asks().remove(deps.storage, ask_key)?;
 
-//     else{
-//         let crr_offering_id = collection_info.offering_id;
-//         let offering = OFFERINGS.may_load(deps.storage, (&nft_address,&crr_offering_id.to_string()))?;
-//         if offering!=None{
-//             OFFERINGS.save(deps.storage, (&nft_address,&offering_id.to_string()), &offering.unwrap())?;
-           
-//             COLLECTIONINFO.update(deps.storage, &nft_address,
-//                 |collection_info|->StdResult<_>{
-//                         let mut collection_info = collection_info.unwrap();
-//                         collection_info.offering_id =collection_info.offering_id-1;
-//                         Ok(collection_info)
-//                 })?;
-//         OFFERINGS.remove( deps.storage, (&nft_address,&crr_offering_id.to_string()));
-  
-//          }
-//     }
+    
+    //bid information for this token_id;
+    let existing_bids_token = query_bids(deps.as_ref(), nft_address.clone(), token_id.clone(), None, Some(MAX_QUERY_LIMIT))?;
+    //remove bids for this token_id
+    for bid in existing_bids_token.bids{
+        match bid.token_address{
+            Some(token_address) =>{
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
+                    contract_addr: token_address.clone(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer { 
+                        recipient: bid.bidder.clone(),
+                        amount: bid.list_price.amount })?,
+                    funds: vec![] }));
+            }   
+            None =>{
+                messages.push(CosmosMsg::Bank(BankMsg::Send {
+                    to_address: bid.bidder.clone(),
+                    amount: vec![Coin{denom: bid.list_price.denom, amount: bid.list_price.amount}] }));               
+            }
+        }
+        bids().remove(deps.storage, (nft_address.clone(), token_id.clone(), bid.bidder))?;                
+    }
 
-//     if off.seller == info.sender.to_string(){
+    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+         contract_addr: nft_address.clone(), 
+         msg: to_binary(&Cw721ExecuteMsg::TransferNft {
+             recipient: ask.seller, 
+             token_id: token_id.clone() })?, 
+         funds: vec![] }));
 
-//         Ok(Response::new()
-//             .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-//                 contract_addr: nft_address.to_string(),
-//                 funds: vec![],
-//                 msg: to_binary(&Cw721ExecuteMsg::TransferNft {
-//                     recipient: deps.api.addr_validate(&off.seller)?.to_string(),
-//                     token_id: off.token_id.clone(),
-//             })?,
-//         }))
-//     )
-//     }
-//     else {
-//         return Err(ContractError::Unauthorized {});
-//     }
-    Ok(Response::default())
+    Ok(Response::new()
+        .add_attribute("action", "cancel the ask")
+        .add_attribute("contract_address", nft_address)
+        .add_attribute("token_id", token_id)
+        .add_messages(messages))
 }
 
 
@@ -790,8 +579,6 @@ fn execute_add_collection(
     royalty_potion: Decimal,
     members: Vec<UserInfo>,
     nft_address:String,
-    offering_id:u64,
-    sale_id:u64
 )->Result<Response,ContractError>{
 
     let state = CONFIG.load(deps.storage)?;
@@ -816,7 +603,6 @@ fn execute_add_collection(
     MEMBERS.save(deps.storage,&nft_address, &members)?;
     COLLECTIONINFO.save(deps.storage,&nft_address,&CollectionInfo{
         nft_address:nft_address.clone(),
-        sale_id:sale_id,
         royalty_portion:royalty_potion
     })?;
     Ok(Response::default())
@@ -861,7 +647,6 @@ fn execute_update_collection(
     COLLECTIONINFO.save(deps.storage,&nft_address,&CollectionInfo{
         nft_address:nft_address.clone(),
         royalty_portion:royalty_potion,
-        sale_id:collection_info.sale_id
     })?;
     Ok(Response::default())
 }
@@ -988,7 +773,7 @@ fn execute_set_offerings(
     deps: DepsMut,
     _env:Env,
     info:MessageInfo,
-    address: String,
+    nft_addres: String,
     offerings:Vec<QueryOfferingsResult>
 ) -> Result<Response, ContractError> {
     let  state = CONFIG.load(deps.storage)?;
@@ -1019,16 +804,16 @@ fn execute_history(
 ) -> Result<Response, ContractError> {
     let  state = CONFIG.load(deps.storage)?;
 
-    if state.owner != info.sender.to_string() {
-        return Err(ContractError::Unauthorized {});
-    }
+    // if state.owner != info.sender.to_string() {
+    //     return Err(ContractError::Unauthorized {});
+    // }
 
-    let mut count = 0;
+    // let mut count = 0;
     
-    for history in histories{
-        count =  count+1;
-        SALEHISTORY.save(deps.storage, (&address,&count.to_string()), &history)?;
-    }
+    // for history in histories{
+    //     count =  count+1;
+    //     SALEHISTORY.save(deps.storage, (&address,&count.to_string()), &history)?;
+    // }
    
     Ok(Response::default())
 }
@@ -1069,6 +854,108 @@ fn store_bid(store: &mut dyn Storage, bid: &Bid) -> StdResult<()> {
         bid_key(&bid.collection, &bid.token_id, &bid.bidder),
         bid,
     )
+}
+
+fn update_sale_history_tvl(
+     store:& mut dyn Storage,
+     env:Env,
+     _info: MessageInfo,
+     seller: String,
+     bidder:String,
+     nft_address: String,
+     token_id: String,
+     list_price: Asset
+) -> StdResult<()> {
+     //Add sale info created by fixed price sale
+        let new_sale_info = SaleInfo { 
+            from: seller,
+            to: bidder.clone(), 
+            denom: list_price.denom.clone(),
+            amount: list_price.amount, 
+            time: env.block.time.seconds(),
+            collection:nft_address.clone(),
+            token_id:token_id.clone()
+        };
+        let crr_time = env.block.time.seconds();
+        let sale_history_key = sale_history_key(&nft_address, &token_id, crr_time);
+        sale_history().save(store, sale_history_key, &new_sale_info)?;
+
+        //update the TVL
+        let denom = list_price.denom;
+        let tvl_key = tvl_key(&nft_address.clone(), &denom);
+        let  crr_tvl = tvl().may_load(store, tvl_key.clone())?;
+        match crr_tvl{
+            Some(mut crr_tvl) => {
+                crr_tvl.amount = crr_tvl.amount + list_price.amount;
+                tvl().save(store, tvl_key, &crr_tvl)?; 
+            }
+            None =>{
+                tvl().save(store, tvl_key, &TvlInfo { 
+                    denom: denom,
+                    amount: list_price.amount,
+                    collection: nft_address.clone() })?; 
+            }
+        }
+
+    Ok(())
+}
+
+fn distribute_money(
+    deps: Deps,
+    nft_address: String,
+    royalty_portion: Decimal,
+    seller: String,
+    bidder: String,
+    list_price: Asset,
+    token_address: Option<String>,
+    token_id: String,
+    messages:& mut Vec<CosmosMsg>
+) -> StdResult<()>{
+        let members = MEMBERS.load(deps.storage,&nft_address)?;
+        let amount = list_price.amount;
+        //Distribute money to the admins
+        if !token_address.is_none(){
+            for user in members{
+                messages.push(CosmosMsg::Bank(BankMsg::Send {
+                        to_address: user.address,
+                        amount:vec![Coin{
+                            denom:list_price.denom.clone(),
+                            amount:amount*royalty_portion*user.portion
+                        }]
+                }))
+            }
+            
+                //Send money to asker
+            messages.push(
+                CosmosMsg::Bank(BankMsg::Send {
+                    to_address: seller,
+                    amount:vec![Coin{
+                        denom:list_price.denom,
+                        amount:amount*(Decimal::one()-royalty_portion)
+                    }]
+                })
+            );
+       }
+            
+        //Transfer NFT to bidder
+        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: nft_address,
+                msg: to_binary(&Cw721ExecuteMsg::TransferNft { 
+                recipient: bidder.clone(),
+                token_id: token_id })?,
+                funds: vec![] }));
+
+        Ok(())
+}
+
+
+/// returns an error if any coins were sent
+pub fn nonpayable(info: &MessageInfo) -> Result<(), ContractError> {
+    if info.funds.is_empty() {
+        Ok(())
+    } else {
+        Err(ContractError::TooMuchFunds {  })
+    }
 }
 
 

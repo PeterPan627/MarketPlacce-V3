@@ -18,17 +18,54 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
  ReceiveNft(Cw721ReceiveMsg),
  Receive(Cw20ReceiveMsg),
- SetBidCoin{nft_address:String, expire: Timestamp, sale_type: SaleType, token_id: String, list_price:Asset},
- WithdrawNft{offering_id:String,nft_address:String},
- ChangeOwner{address:String},
- AddTokenAddress{symbol:String,address:String},
- AddCollection{royalty_portion:Decimal,members:Vec<UserInfo>,nft_address:String,offering_id:u64,sale_id:u64},
- UpdateCollection{royalty_portion:Decimal,members:Vec<UserInfo>,nft_address:String},
- FixNft{address:String,token_id:String},
- SetOfferings{address:String,offering:Vec<QueryOfferingsResult>},
- SetTvl{address:String,tvl:Vec<TvlInfo>},
- Migrate{address:String,dest:String,token_id : Vec<String>},
- SetSaleHistory{address:String,history:Vec<SaleInfo>},
+ SetBidCoin{
+    nft_address:String, 
+    expire: Timestamp, 
+    sale_type: SaleType, 
+    token_id: String, 
+    list_price:Asset
+},
+ WithdrawNft{
+    nft_address: String,
+    token_id: String
+},
+ ChangeOwner{
+    address:String
+},
+ AddTokenAddress{
+    symbol:String,address:String
+},
+ AddCollection{
+    royalty_portion:Decimal,
+    members:Vec<UserInfo>,
+    nft_address:String
+},
+ UpdateCollection{
+    royalty_portion:Decimal,
+    members:Vec<UserInfo>,
+    nft_address:String
+},
+ FixNft{
+    address:String,
+    token_id:String
+},
+ SetOfferings{
+    address:String,
+    offering:Vec<QueryOfferingsResult>
+},
+ SetTvl{
+    address:String,
+    tvl:Vec<TvlInfo>
+},
+ Migrate{
+    address:String,
+    dest:String,
+    token_id : Vec<String>
+},
+ SetSaleHistory{
+    address:String,
+    history:Vec<SaleInfo>
+},
  SetBidLimit{bid_limit:u32}
 }
 
@@ -38,10 +75,7 @@ pub enum QueryMsg {
     /// Returns a human-readable representation of the arbiter.
     GetStateInfo {},
     GetMembers{address:String},
-    GetSaleHistory{address:String,id:Vec<String>},
     GetCollectionInfo{address:String},
-    GetTvl{address:String,symbol:String},
-    GetTvlAll{address:String,symbols:Vec<String>},
     /// Get the current ask for specific NFT
     /// Return type: `CurrentAskResponse`
     Ask{collection:String, token_id:String},
@@ -105,6 +139,34 @@ pub enum QueryMsg {
         start_after: Option<CollectionOffsetBid>,
         limit: Option<u32>,
     },
+    SaleHistoryByCollection{
+        collection: String,
+        start_after: Option<SaleHistoryOffset>,
+        limit: Option<u32>
+    },
+    //start after is time
+    SaleHistoryByTokenId{
+        collection: String,
+        token_id: String,
+        start_after: Option<u64>,
+        limit: Option<u32>
+    },
+    //start after is denom
+    GetTvlbyCollection{
+        collection: String,
+        start_after: Option<String>,
+        limit: Option<u32>
+    },
+    //start after is collection
+    GetTvlByDenom{
+        denom: String,
+        start_after: Option<String>,
+        limit: Option<u32>
+    },
+    GetTvlIndividaul{
+        collection:String,
+        denom:String
+    }
 }
 
 /// Offset for collection pagination
@@ -121,6 +183,14 @@ pub struct CollectionOffsetBid {
     pub collection: String,
     pub token_id: String,
     pub bidder: String
+}
+
+
+/// Salehistory offset for the pagination sale histroy by collection
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct SaleHistoryOffset {
+    pub token_id: String,
+    pub time: u64
 }
 
 
@@ -167,4 +237,20 @@ pub struct BidResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct BidsResponse {
     pub bids: Vec<Bid>,
+}
+
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct SaleHistroyResponse {
+    pub sale_history: Vec<SaleInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct TvlResponse {
+    pub tvl: Vec<TvlInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct TvlIndividualResponse {
+    pub tvl: Option<TvlInfo>,
 }

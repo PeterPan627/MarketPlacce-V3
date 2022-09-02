@@ -5,7 +5,6 @@ use cw_storage_plus::{Item,Map,MultiIndex,IndexList,Index,IndexedMap};
 
 pub const CONFIG: Item<State> = Item::new("config_state");
 pub const MEMBERS: Map<&str,Vec<UserInfo>> = Map::new("config_members");
-pub const SALEHISTORY: Map<(&str,&str), SaleInfo> = Map::new("sale");
 pub const COLLECTIONINFO: Map<&str, CollectionInfo> = Map::new("collection_info");
 pub const TOKENADDRESS: Map<&str, String> = Map::new("token_address");
 pub const COINDENOM: Map<&str, bool> = Map::new("coin_denom");
@@ -142,6 +141,102 @@ pub fn bids<'a>() -> IndexedMap<'a, BidKey, Bid, BidIndicies<'a>> {
 
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct SaleInfo {
+    pub from :String,
+    pub to: String,
+    pub denom:String,
+    pub amount:Uint128,
+    pub time : u64,
+    pub collection:String,
+    pub token_id:String
+}
+
+/// Primary key for bids: (collection, token_id, bidder)
+pub type SaleHistoryKey = (String, String, u64);
+/// Convenience bid key constructor
+pub fn sale_history_key(collection: &String, token_id: &String, time: u64) -> SaleHistoryKey {
+    (collection.clone(), token_id.clone(), time)
+}
+
+
+/// Defines incides for accessing bids
+pub struct SaleHistoryIndicies<'a> {
+    pub collection: MultiIndex<'a, String, SaleInfo, SaleHistoryKey>,
+    pub collection_token_id: MultiIndex<'a, (String, String), SaleInfo, SaleHistoryKey>,
+}
+
+impl<'a> IndexList<SaleInfo> for SaleHistoryIndicies<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<SaleInfo>> + '_> {
+        let v: Vec<&dyn Index<SaleInfo>> = vec![
+            &self.collection,
+            &self.collection_token_id,
+        ];
+        Box::new(v.into_iter())
+    }
+}
+
+pub fn sale_history<'a>() -> IndexedMap<'a, SaleHistoryKey, SaleInfo, SaleHistoryIndicies<'a>> {
+    let indexes = SaleHistoryIndicies {
+        collection: MultiIndex::new(|d: &SaleInfo| d.collection.clone(), "sale_history", "sale_history_collection"),
+        collection_token_id: MultiIndex::new(
+            |d: &SaleInfo| (d.collection.clone(), d.token_id.clone()),
+            "sale_history",
+            "sale_history__collection_token_id",
+        ),
+    };
+    IndexedMap::new("sale_history", indexes)
+}
+
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TvlInfo {
+   pub denom : String,
+   pub amount: Uint128,
+   pub collection: String 
+}
+
+
+/// Primary key for bids: (collection, denom)
+pub type TvlKey = (String, String);
+/// Convenience bid key constructor
+pub fn tvl_key(collection: &String, denom: &String) -> TvlKey {
+    (collection.clone(), denom.clone())
+}
+
+
+/// Defines incides for accessing bids
+pub struct TvlIndicies<'a> {
+    pub collection: MultiIndex<'a, String, TvlInfo, TvlKey>,
+    pub denom: MultiIndex<'a, String, TvlInfo, TvlKey>,
+}
+
+impl<'a> IndexList<TvlInfo> for TvlIndicies<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<TvlInfo>> + '_> {
+        let v: Vec<&dyn Index<TvlInfo>> = vec![
+            &self.collection,
+            &self.denom,
+        ];
+        Box::new(v.into_iter())
+    }
+}
+
+pub fn tvl<'a>() -> IndexedMap<'a, TvlKey, TvlInfo, TvlIndicies<'a>> {
+    let indexes = TvlIndicies {
+        collection: MultiIndex::new(|d: &TvlInfo| d.collection.clone(), "tvl", "tvl_collection"),
+        denom: MultiIndex::new(
+            |d: &TvlInfo| d.denom.clone(),
+            "tvl",
+            "tvl_denom",
+        ),
+    };
+    IndexedMap::new("tvl", indexes)
+}
+
+
+
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Asset {
     pub denom:String,
     pub amount:Uint128
@@ -154,35 +249,12 @@ pub struct UserInfo {
     pub portion:Decimal
 }
 
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct SaleInfo {
-    pub from :String,
-    pub to: String,
-    pub denom:String,
-    pub amount:Uint128,
-    pub time : u64,
-    pub nft_address:String,
-    pub token_id:String
-}
-
-
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 
 pub struct CollectionInfo{
     pub nft_address :String,
-    pub royalty_portion:Decimal,
-    pub sale_id : u64
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TvlInfo {
-   pub denom : String,
-   pub amount: Uint128
+    pub royalty_portion:Decimal
 }
 
 

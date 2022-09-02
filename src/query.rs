@@ -1,8 +1,8 @@
 use crate::msg::{
-    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid,
+    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid, SaleHistoryOffset, SaleHistroyResponse, TvlResponse, TvlIndividualResponse,
 };
 use crate::state::{
-    ask_key, asks, bid_key, bids,  BidKey, State, CONFIG, CollectionInfo, COLLECTIONINFO,TVL, TvlInfo, SaleInfo, SALEHISTORY, MEMBERS, UserInfo
+    ask_key, asks, bid_key, bids,  BidKey, State, CONFIG, CollectionInfo, COLLECTIONINFO,TVL, TvlInfo, SaleInfo, MEMBERS, UserInfo, sale_history_key, sale_history, tvl
 };
 use cosmwasm_std::{entry_point, to_binary, Addr, Binary, Deps, Env, Order, StdResult, Uint128};
 use cw_storage_plus::{Bound, PrefixBound};
@@ -21,21 +21,9 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::GetMembers {
           address
         } => to_binary(&query_get_members(deps,address)?),
-        QueryMsg::GetSaleHistory {
-          address,
-           id 
-          } => to_binary(&query_get_history(deps,address,id)?),
         QueryMsg::GetCollectionInfo {
            address 
           } =>to_binary(&query_collection_info(deps,address)?),
-        QueryMsg::GetTvl {
-           address, 
-           symbol 
-          }=> to_binary(&query_get_tvl(deps,address,symbol)?),
-        QueryMsg::GetTvlAll {
-           address, 
-           symbols
-           }=> to_binary(&query_all_tvl(deps,address,symbols)?),
         QueryMsg::Ask {
             collection,
             token_id,
@@ -118,12 +106,62 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::BidsBySeller {
            seller,
            start_after,
-           limit }  => to_binary(&query_bids_by_seller(
+           limit 
+         }  => to_binary(&query_bids_by_seller(
             deps,
             seller,
             start_after,
             limit,
-        )?)
+        )?),
+        QueryMsg::SaleHistoryByCollection {
+           collection,
+           start_after,
+           limit
+         } => to_binary(&query_sale_history(
+             deps,
+             collection,
+             start_after,
+             limit
+           )?),
+        QueryMsg::SaleHistoryByTokenId { 
+          collection,
+          token_id,
+          start_after, 
+          limit 
+        } => to_binary(&query_sale_history_by_token_id(
+          deps,
+          collection,
+          token_id,
+          start_after,
+          limit
+        )?),
+        QueryMsg::GetTvlbyCollection {
+          collection,
+          start_after ,
+          limit
+        } => to_binary(&query_tvl_by_collection(
+          deps,
+          collection, 
+          start_after, 
+          limit)?),
+        QueryMsg::GetTvlByDenom { 
+          denom, 
+          start_after, 
+          limit 
+        } => to_binary(&query_tvl_by_denom(
+          deps,
+          denom,
+          start_after,
+          limit
+        )?),
+        QueryMsg::GetTvlIndividaul { 
+          collection, 
+          denom 
+        } => to_binary(&query_tvl_by_individual(
+          deps,
+          collection,
+          denom
+        )?) 
     }
 }
 
@@ -138,51 +176,12 @@ pub fn query_collection_info(deps:Deps,address:String) -> StdResult<CollectionIn
 }
 
 
-pub fn query_get_tvl(deps:Deps,address:String,symbol:String) -> StdResult<Uint128>{
-    let tvl = TVL.may_load(deps.storage, (&address,&symbol))?;
-    if tvl == None{
-        Ok(Uint128::new(0))
-    }
-    else{
-        Ok(tvl.unwrap())
-    }
-}
-
-pub fn query_all_tvl(deps:Deps,address:String,symbols:Vec<String>) -> StdResult<Vec<TvlInfo>>{
-    let mut empty:Vec<TvlInfo> = vec![];
-    for symbol in symbols
-    {
-        let tvl = TVL.may_load(deps.storage, (&address,&symbol))?;
-        if tvl == None{
-            empty.push(TvlInfo { denom: symbol, amount: Uint128::new(0) })
-        }
-        else{
-              empty.push(TvlInfo { denom: symbol, amount: tvl.unwrap() })
-         
-        }
-    }
-    Ok(empty)
-}
-
-
 pub fn query_get_members(deps:Deps,address:String) -> StdResult<Vec<UserInfo>>{
     let members = MEMBERS.load(deps.storage,&address)?;
     Ok(members)
 }
 
 
-
-
-pub fn query_get_history(deps:Deps,address:String, ids:Vec<String>) -> StdResult<Vec<SaleInfo>>{
-    let mut sale_history : Vec<SaleInfo> = vec![];
-    for id in ids{
-       let history =  SALEHISTORY.may_load(deps.storage, (&address,&id))?;
-       if history != None{
-        sale_history.push(history.unwrap());
-       }
-    }
-    Ok(sale_history)
-}
 
 
 pub fn query_ask(deps: Deps, collection: String, token_id: String) -> StdResult<AskResponse> {
@@ -416,4 +415,134 @@ pub fn query_bids_by_seller(
         .collect::<StdResult<Vec<_>>>()?;
 
     Ok(BidsResponse { bids })
+}
+
+
+pub fn query_sale_history(
+    deps: Deps,
+    collection: String,
+    start_after: Option<SaleHistoryOffset>,
+    limit: Option<u32>,
+) -> StdResult<SaleHistroyResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let start = if let Some(start) = start_after {
+        Some(Bound::exclusive(sale_history_key(
+            &collection,
+            &start.token_id,
+            start.time,
+        )))
+    } else {
+        None
+    };
+
+    let sale_history = sale_history()
+        .idx
+        .collection
+        .prefix(collection)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(SaleHistroyResponse {  sale_history })
+}
+
+pub fn query_sale_history_by_token_id(
+    deps: Deps,
+    collection: String,
+    token_id: String,
+    start_after: Option<u64>,
+    limit: Option<u32>,
+) -> StdResult<SaleHistroyResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+    let start = if let Some(start) = start_after {
+        Some(Bound::exclusive(sale_history_key(
+            &collection,
+            &token_id,
+            start,
+        )))
+    } else {
+        None
+    };
+
+    let sale_history = sale_history()
+        .idx
+        .collection_token_id
+        .prefix((collection, token_id))
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(SaleHistroyResponse { sale_history })
+}
+
+
+pub fn query_tvl_by_collection(
+    deps: Deps,
+    collection: String,
+    start_after: Option<String>,
+    limit: Option<u32>,
+) -> StdResult<TvlResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let tvl = tvl()
+        .idx
+        .collection
+        .prefix(collection.clone())
+        .range(
+            deps.storage,
+            Some(Bound::exclusive((
+                collection,
+                start_after.unwrap_or_default(),
+            ))),
+            None,
+            Order::Ascending,
+        )
+        .take(limit)
+        .map(|res| res.map(|item| item.1))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(TvlResponse { tvl })
+}
+
+
+
+pub fn query_tvl_by_denom(
+    deps: Deps,
+    denom: String,
+    start_after: Option<String>,
+    limit: Option<u32>,
+) -> StdResult<TvlResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let tvl = tvl()
+        .idx
+        .denom
+        .prefix(denom.clone())
+        .range(
+            deps.storage,
+            Some(Bound::exclusive((
+              start_after.unwrap_or_default(),  
+              denom
+            ))),
+            None,
+            Order::Ascending,
+        )
+        .take(limit)
+        .map(|res| res.map(|item| item.1))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(TvlResponse { tvl })
+}
+
+pub fn query_tvl_by_individual(
+  deps: Deps,
+  collection: String,
+  denom: String
+) -> StdResult<TvlIndividualResponse>{
+  let tvl = tvl().may_load(deps.storage, (collection,denom))?;
+  
+  Ok(TvlIndividualResponse{ tvl })
 }
