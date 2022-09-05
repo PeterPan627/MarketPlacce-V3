@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::contract::{execute, instantiate};
 use crate::msg::{ExecuteMsg, InstantiateMsg, SellNft, BuyNft, CollectionOffset, CollectionOffsetBid, SaleHistoryOffset, SaleHistoryOffsetByUser};
-use crate::query::{query_ask_count, query_asks_by_seller, query_bids_by_bidder, query_state_info, query_ask, query_asks, query_bids, query_bids_by_seller, query_bids_by_bidder_sorted_by_expiry, query_tvl_by_collection, query_tvl_by_denom, query_sale_history, query_sale_history_by_token_id, query_sale_history_by_buyer, query_sale_history_by_seller};
+use crate::query::{query_ask_count, query_asks_by_seller, query_bids_by_bidder, query_state_info, query_ask, query_asks, query_bids, query_bids_by_seller, query_bids_by_bidder_sorted_by_expiry, query_tvl_by_collection, query_tvl_by_denom, query_sale_history, query_sale_history_by_token_id, query_sale_history_by_buyer, query_sale_history_by_seller, query_collection_bid, query_collection_bids_by_bidder, query_collection_bid_by_collection};
 use crate::state::{ask_key, asks, bid_key, bids, Ask, Bid, SaleType, Asset, UserInfo};
 
 use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
@@ -112,6 +112,27 @@ fn bid_nft_with_token_fixed_price(deps: DepsMut,env: Env, collection: String, to
 }
 
 
+fn collection_bid_nft_with_token(deps: DepsMut,env: Env, collection: String, token_id: Option<String>, token_address: &str, sender:String, amount:Uint128) -> StdResult<Response>{
+   let bid_msg = BuyNft{
+     nft_address: collection,
+     expire: Timestamp::from_seconds(env.block.time.seconds() + 300),
+     sale_type: SaleType::CollectionBid,
+     token_id
+   };
+
+   let info = mock_info(token_address,&[]);
+   let msg = ExecuteMsg::Receive(Cw20ReceiveMsg{
+      sender,
+      amount,
+      msg: to_binary(&bid_msg).unwrap()
+    });
+
+   let res = execute(deps, env, info, msg).unwrap();
+   Ok(res)
+}
+
+
+
 fn bid_nft_with_coin(deps: DepsMut,env: Env, collection: String, token_id: Option<String>, sender:&str, denom:String, amount:Uint128) -> StdResult<Response>{
   
    let info = mock_info(sender,&[Coin{
@@ -141,6 +162,25 @@ fn bid_nft_with_coin_fixed_price(deps: DepsMut,env: Env, collection: String, tok
     nft_address: collection, 
     expire: Timestamp::from_seconds(env.block.time.seconds() + 300), 
     sale_type: SaleType::FixedPrice, 
+    token_id, 
+    list_price: Asset { denom, amount } 
+   };
+
+   let res = execute(deps, env, info, msg).unwrap();
+   Ok(res)
+}
+
+
+fn collection_bid_nft_with_coin(deps: DepsMut,env: Env, collection: String, token_id: Option<String>, sender:&str, denom:String, amount:Uint128) -> StdResult<Response>{
+  
+   let info = mock_info(sender,&[Coin{
+    denom: denom.clone(),
+    amount: amount
+   }]);
+   let msg = ExecuteMsg::SetBidCoin { 
+    nft_address: collection, 
+    expire: Timestamp::from_seconds(env.block.time.seconds() + 300), 
+    sale_type: SaleType::CollectionBid, 
     token_id, 
     list_price: Asset { denom, amount } 
    };
@@ -341,6 +381,7 @@ fn test_bid() {
     bidder: "bider1".to_string(),
   }), Some(10)).unwrap();
 
+  println!("{:?}",_bids_collection)
   // let _bids_expires = query_bids_by_bidder_sorted_by_expiry(deps.as_ref(), "bider1".to_string(), None, Some(10)).unwrap(); 
   // println!("{:?}",_bids_expires)
 }
@@ -479,9 +520,10 @@ fn withdraw_nft() {
   funds: vec![] 
   }));
 
+  let ask = query_asks(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
+  println!("{:?}",ask)
+
 }
-
-
 
 #[test] 
 fn accept_bid() {
@@ -666,14 +708,18 @@ fn accept_bid() {
 
   let tvl = query_tvl_by_collection(deps.as_ref(), "collection1".to_string(), None, Some(30)).unwrap();
   println!("{:?}",tvl);
-  let tvl = query_tvl_by_denom(deps.as_ref(), "hope".to_string(), None, Some(20)).unwrap();
+  let _tvl = query_tvl_by_denom(deps.as_ref(), "hope".to_string(), None, Some(20)).unwrap();
 
   let  sale_history_by_token_id = query_sale_history_by_token_id(deps.as_ref(), "collection1".to_string(), "Hope.1".to_string(), None, Some(20)).unwrap();
   println!("{:?}", sale_history_by_token_id);
+
+  let asks = query_asks(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
+  println!("{:?}",asks)
 }
 
 #[test]
 fn fixed_price_buy(){
+
   let mut deps = mock_dependencies();
   let env = mock_env();
 
@@ -881,4 +927,278 @@ fn fixed_price_buy(){
   println!("{:?}",sale_history);
 
   //let sale_history = query_sale_history_by_seller(deps, seller, start_after, limit)
+
+  let bid = query_bids(deps.as_ref(), "collection1".to_string(), "Hope.1".to_string(), None, Some(30)).unwrap();
+  println!("{:?}",bid);
+  let ask = query_asks(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
+  println!("{:?}",ask);
+}
+
+#[test]
+fn test_collection_bid() {
+  let mut deps = mock_dependencies();
+  let env = mock_env();
+
+  //init contract
+  setup_contract(deps.as_mut());
+
+  //add collection
+  add_contract(deps.as_mut(), env.clone() , "collection1".to_string() );
+  add_contract(deps.as_mut(), env.clone() , "collection2".to_string() );
+
+  //add coin
+  add_coin(deps.as_mut(), env.clone(), "ujuno".to_string());
+  add_token(deps.as_mut(), env.clone(), "hope".to_string(), "hope_address".to_string());
+
+
+  sell_nft(
+    deps.as_mut(),
+    env.clone(),
+    "collection1", 
+    "seller1".to_string(), 
+    "ujuno".to_string(), 
+    Uint128::new(10000), 
+    None, 
+    "Hope.1".to_string()
+  );
+  
+  sell_nft(
+    deps.as_mut(),
+    env.clone(), 
+    "collection2", 
+    "seller2".to_string(), 
+    "hope".to_string(), 
+    Uint128::new(20000), 
+    Some("hope_address".to_string()), 
+    "Hope.2".to_string()
+  );
+
+  let _res = collection_bid_nft_with_coin(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    None, 
+    "collection_bider1", 
+    "ujuno".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+   let _res = collection_bid_nft_with_token(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    None, 
+    "hope_address", 
+    "collection_bider2".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+    let _res = collection_bid_nft_with_coin(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection2".to_string(), 
+    None, 
+    "collection_bider1", 
+    "ujuno".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+  
+  let collection_bid = query_collection_bid_by_collection(deps.as_ref(), "collection1".to_string(), Some("collection_bider1".to_string()), Some(20)).unwrap();
+  println!("{:?}",collection_bid);
+  
+  let collection_bid = query_collection_bids_by_bidder(deps.as_ref(), "collection_bider1".to_string(), None, Some(20)).unwrap();
+  println!("{:?}",collection_bid);
+} 
+
+#[test]
+fn accept_collection_bid(){
+   let mut deps = mock_dependencies();
+  let env = mock_env();
+
+  //init contract
+  setup_contract(deps.as_mut());
+
+  //add collection
+  add_contract(deps.as_mut(), env.clone() , "collection1".to_string() );
+  add_contract(deps.as_mut(), env.clone() , "collection2".to_string() );
+
+  //add coin
+  add_coin(deps.as_mut(), env.clone(), "ujuno".to_string());
+  add_token(deps.as_mut(), env.clone(), "hope".to_string(), "hope_address".to_string());
+
+
+  sell_nft(
+    deps.as_mut(),
+    env.clone(),
+    "collection1", 
+    "seller1".to_string(), 
+    "ujuno".to_string(), 
+    Uint128::new(10000), 
+    None, 
+    "Hope.1".to_string()
+  );
+
+   
+  let _res = bid_nft_with_token(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    Some("Hope.1".to_string()), 
+    "hope_address", 
+    "bider1".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+  let _res = bid_nft_with_coin(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    Some("Hope.1".to_string()), 
+    "bider2", 
+    "ujuno".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+  sell_nft(
+    deps.as_mut(),
+    env.clone(),
+    "collection1", 
+    "seller1".to_string(), 
+    "ujuno".to_string(), 
+    Uint128::new(10000), 
+    None, 
+    "Hope.2".to_string()
+  );
+
+ 
+   
+  let _res = bid_nft_with_token(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    Some("Hope.2".to_string()), 
+    "hope_address", 
+    "bider1".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+  let _res = bid_nft_with_coin(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    Some("Hope.2".to_string()), 
+    "bider2", 
+    "ujuno".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+  
+  let _res = collection_bid_nft_with_coin(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    None, 
+    "collection_bider1", 
+    "ujuno".to_string(), 
+    Uint128::new(3000)
+  ).unwrap();
+
+  let _res = collection_bid_nft_with_token(
+    deps.as_mut(), 
+    env.clone(), 
+    "collection1".to_string(), 
+    None, 
+    "hope_address", 
+    "collection_bider2".to_string(), 
+    Uint128::new(3000)
+  );
+
+  let info = mock_info("seller1",&[]);
+  let msg = ExecuteMsg::AcceptCollectionBid { nft_address: "collection1".to_string(), token_id: "Hope.1".to_string(), bidder: "collection_bider1".to_string() };
+  let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+  assert_eq!(6, res.messages.len());
+  assert_eq!(res.messages[0].msg,CosmosMsg::Wasm(WasmMsg::Execute{
+     contract_addr: "hope_address".to_string(), 
+     msg: to_binary(&Cw20ExecuteMsg::Transfer{ recipient: "bider1".to_string(), amount: Uint128::new(3000) }).unwrap(), 
+     funds: vec![] }));
+
+  assert_eq!(res.messages[1].msg, CosmosMsg::Bank(BankMsg::Send { 
+    to_address: "bider2".to_string(), 
+    amount: vec![Coin{
+      denom:"ujuno".to_string(),
+      amount:Uint128::new(3000)
+    }] }));
+
+  assert_eq!(res.messages[2].msg, CosmosMsg::Bank(BankMsg::Send { 
+    to_address: "admin1".to_string(), 
+    amount: vec![Coin{
+      denom:"ujuno".to_string(),
+      amount:Uint128::new(210)
+    }] })
+  );
+
+  assert_eq!(res.messages[3].msg, CosmosMsg::Bank(BankMsg::Send { 
+    to_address: "admin2".to_string(), 
+    amount: vec![Coin{
+      denom:"ujuno".to_string(),
+      amount:Uint128::new(90)
+    }] })
+  );
+
+  assert_eq!(res.messages[4].msg,CosmosMsg::Bank(BankMsg::Send { 
+    to_address: "seller1".to_string(), 
+    amount: vec![Coin{
+      denom:"ujuno".to_string(),
+      amount:Uint128::new(2700)
+    }] }));
+  
+  assert_eq!(res.messages[5].msg, CosmosMsg::Wasm(WasmMsg::Execute { contract_addr: "collection1".to_string(), 
+  msg: to_binary(&Cw721ExecuteMsg::TransferNft{ recipient: "collection_bider1".to_string(), token_id: "Hope.1".to_string() }).unwrap(), 
+  funds: vec![] 
+  }));
+
+  let info = mock_info("seller1",&[]);
+  let msg = ExecuteMsg::AcceptCollectionBid { nft_address: "collection1".to_string(), token_id: "Hope.2".to_string(), bidder: "collection_bider2".to_string() };
+  let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+  assert_eq!(res.messages[0].msg,CosmosMsg::Wasm(WasmMsg::Execute{
+    contract_addr: "hope_address".to_string(), 
+    msg: to_binary(&Cw20ExecuteMsg::Transfer{ recipient: "bider1".to_string(), amount: Uint128::new(3000) }).unwrap(), 
+    funds: vec![] }));
+
+  assert_eq!(res.messages[1].msg, CosmosMsg::Bank(BankMsg::Send { 
+    to_address: "bider2".to_string(), 
+    amount: vec![Coin{
+      denom:"ujuno".to_string(),
+      amount:Uint128::new(3000)
+    }] }));
+  
+  assert_eq!(res.messages[2].msg,CosmosMsg::Wasm(WasmMsg::Execute{
+    contract_addr: "hope_address".to_string(), 
+    msg: to_binary(&Cw20ExecuteMsg::Transfer{ recipient: "admin1".to_string(), amount: Uint128::new(210) }).unwrap(), 
+    funds: vec![] })); 
+
+  
+  assert_eq!(res.messages[3].msg,CosmosMsg::Wasm(WasmMsg::Execute{
+    contract_addr: "hope_address".to_string(), 
+    msg: to_binary(&Cw20ExecuteMsg::Transfer{ recipient: "admin2".to_string(), amount: Uint128::new(90) }).unwrap(), 
+    funds: vec![] })); 
+
+   assert_eq!(res.messages[4].msg,CosmosMsg::Wasm(WasmMsg::Execute{
+     contract_addr: "hope_address".to_string(), 
+     msg: to_binary(&Cw20ExecuteMsg::Transfer{ recipient: "seller1".to_string(), amount: Uint128::new(2700) }).unwrap(), 
+     funds: vec![] })); 
+
+      
+  assert_eq!(res.messages[5].msg, CosmosMsg::Wasm(WasmMsg::Execute { contract_addr: "collection1".to_string(), 
+  msg: to_binary(&Cw721ExecuteMsg::TransferNft{ recipient: "collection_bider2".to_string(), token_id: "Hope.2".to_string() }).unwrap(), 
+  funds: vec![] 
+  }));
+
+  let tvl = query_tvl_by_collection(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
+  println!("{:?}",tvl);
+
+  let sale_history = query_sale_history(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
+  println!("{:?}",sale_history)
 }

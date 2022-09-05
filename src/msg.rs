@@ -183,6 +183,12 @@ pub enum QueryMsg {
         collection: String,
         bidder: String,
     },
+
+    CollectionBidByCollection{
+        collection:String,
+        start_after: Option<String>,
+        limit: Option<u32>
+    },
     /// Get all collection bids by a bidder
     /// Return type: `CollectionBidsResponse`
     CollectionBidsByBidder {

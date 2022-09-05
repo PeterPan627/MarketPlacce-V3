@@ -385,14 +385,19 @@ fn execute_receive(
         }
 
         SaleType::CollectionBid => {
+           if !token_id.is_none(){
+            return Err(ContractError::WrongConfig {  });
+           }
+
             let mut messages:Vec<CosmosMsg> = Vec::new();
-            let bidder = info.sender.to_string();
+            let bidder = rcv_msg.sender;
             let key = collection_bid_key(&nft_address, &bidder);
+            // println!("{:?}",key);
 
             let existing_bid = collection_bids().may_load(deps.storage, key.clone())?;
             if let Some(bid) = existing_bid{
                 collection_bids().remove(deps.storage, key.clone())?;
-               
+             
                 if bid.token_address.is_none(){
                     messages.push(CosmosMsg::Bank(BankMsg::Send {
                              to_address: bidder.clone(),
@@ -663,6 +668,10 @@ fn execute_bid_with_coin(
             let mut messages:Vec<CosmosMsg> = Vec::new();
             let bidder = info.sender.to_string();
             let key = collection_bid_key(&nft_address, &bidder);
+
+            if !token_id.is_none(){
+              return Err(ContractError::WrongConfig {  });
+           }
 
             let existing_bid = collection_bids().may_load(deps.storage, key.clone())?;
             if let Some(bid) = existing_bid{
@@ -1171,6 +1180,9 @@ pub fn execute_accept_collection_bid(
             if existing_ask.seller != sender{
                 return Err(ContractError::Unauthorized {  });
             }
+            if existing_ask.is_expired(&env.block){
+              return Err(ContractError::AskExpired {  })
+            }
         },
         None =>{
             return Err(ContractError::NoSuchAsk {  })
@@ -1225,7 +1237,8 @@ pub fn execute_accept_collection_bid(
         .add_attribute("seller", existing_ask.seller)
         .add_attribute("bidder", bidder)
         .add_attribute("denom", bid.list_price.denom)
-        .add_attribute("amount", bid.list_price.amount.to_string()))
+        .add_attribute("amount", bid.list_price.amount.to_string())
+        .add_messages(messages))
 }
 
 

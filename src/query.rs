@@ -206,6 +206,12 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
           seller,
           start_after,
           limit
+        )?),
+        QueryMsg::CollectionBidByCollection {collection, start_after, limit } => to_binary(&query_collection_bid_by_collection(
+          deps,
+          collection,
+          start_after,
+          limit
         )?)  
     }
 }
@@ -725,6 +731,35 @@ pub fn query_collection_bids_by_bidder_sorted_by_expiry(
         .idx
         .bidder_expires_at
         .sub_prefix(bidder)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(CollectionBidsResponse { bids })
+}
+
+
+
+pub fn query_collection_bid_by_collection(
+    deps: Deps,
+    collection: String,
+    start_after: Option<String>,
+    limit: Option<u32>,
+) -> StdResult<CollectionBidsResponse> {
+    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+    let start: Option<Bound<(String, String)>> = match start_after {
+        Some(start) => {
+             deps.api.addr_validate(&collection)?;
+             let collection = collection.clone();
+             Some(Bound::exclusive((collection, start.clone())))
+        }
+        None => None,
+    };
+    let bids = collection_bids()
+        .idx
+        .collection
+        .prefix(collection)
         .range(deps.storage, start, None, Order::Ascending)
         .take(limit)
         .map(|item| item.map(|(_, b)| b))

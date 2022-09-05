@@ -275,7 +275,7 @@ pub struct CollectionBidIndicies<'a> {
     pub collection: MultiIndex<'a, String, CollectionBid, CollectionBidKey>,
     pub bidder: MultiIndex<'a, String, CollectionBid, CollectionBidKey>,
     // Cannot include `Timestamp` in index, converted `Timestamp` to `seconds` and stored as `u64`
-    pub bidder_expires_at: MultiIndex<'a, (String, u64), CollectionBid, CollectionBidKey>,
+    pub bidder_expires_at: MultiIndex<'a, (String, u64), CollectionBid, CollectionBidKey>
 }
 
 impl<'a> IndexList<CollectionBid> for CollectionBidIndicies<'a> {
