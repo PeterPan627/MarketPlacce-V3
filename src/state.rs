@@ -132,8 +132,8 @@ pub fn bids<'a>() -> IndexedMap<'a, BidKey, Bid, BidIndicies<'a>> {
         seller: MultiIndex::new(|d: &Bid| d.seller.clone(), "bids", "bids__seller"),
         bidder_expires_at: MultiIndex::new(
             |d: &Bid| (d.bidder.clone(), d.expires_at.seconds()),
-            "col_bids",
-            "col_bids__bidder_expires_at",
+            "bids",
+            "bids__bidder_expires_at",
         ),   
     };
     IndexedMap::new("bids", indexes)

@@ -54,10 +54,13 @@ pub enum ExecuteMsg {
     },
     /// Priviledged operation to change the active state of an ask when an NFT is transferred
     ChangeOwner{
-        address:String
+        address: String
     },
     AddTokenAddress{
-        symbol:String,address:String
+        symbol: String,address: String
+    },
+    AddCoin{
+        symbol: String
     },
     AddCollection{
         royalty_portion:Decimal,
@@ -90,7 +93,13 @@ pub enum ExecuteMsg {
         address:String,
         history:Vec<SaleInfo>
     },
-    SetBidLimit{bid_limit:u32}
+    SetBidLimit{bid_limit:u32},
+    Withdraw{
+        token_amount: Uint128,
+        coin_amount: Uint128,
+        token_address: String,
+        coin_denom: String
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -260,7 +269,6 @@ pub struct SaleHistoryOffset {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct SellNft {
     pub list_price: Asset,
-    pub is_coin: bool,
     pub expire: Timestamp,
     pub token_address: Option<String>
 }

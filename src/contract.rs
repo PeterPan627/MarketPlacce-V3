@@ -1,7 +1,5 @@
-use std::clone;
-
 use cosmwasm_std::{
-    entry_point, to_binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,from_binary,Binary,
+    entry_point, to_binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,from_binary,
     StdResult, Uint128,CosmosMsg,WasmMsg,Decimal,BankMsg,Storage, Timestamp
 };
 
@@ -143,6 +141,14 @@ pub fn execute(
             info,
             symbol,
             address),
+        ExecuteMsg::AddCoin {
+             symbol
+        } => execute_add_coin(
+            deps,
+            env,
+            info,
+            symbol
+        ),
         ExecuteMsg::ChangeOwner {
              address 
         } =>execute_change_owner(
@@ -174,7 +180,8 @@ pub fn execute(
              dest, 
              token_id }=>execute_migrate(deps,env,info,address,dest,token_id),
         ExecuteMsg::SetSaleHistory { address, history }=>execute_history(deps,env,info,address,history),
-        ExecuteMsg::SetBidLimit { bid_limit } => execute_bid_limit(deps,env,info,bid_limit)
+        ExecuteMsg::SetBidLimit { bid_limit } => execute_bid_limit(deps,env,info,bid_limit),
+        ExecuteMsg::Withdraw { token_amount, coin_amount ,token_address, coin_denom } => execute_withdraw_coin(deps,env,info,token_amount,coin_amount,token_address,coin_denom)
  }
 }
 
@@ -198,7 +205,7 @@ fn execute_receive_nft(
     let token_address = msg.token_address;
 
     //Coin and Token validation
-    if msg.is_coin{
+    if token_address.is_none(){
         match COINDENOM.may_load(deps.storage, &msg.list_price.denom)?{
             Some(denom) =>{
                if !denom{
@@ -209,16 +216,8 @@ fn execute_receive_nft(
                 return Err(ContractError::WrongCoinDenom {  })
             }
         }
-        //Validate Configuration, token_address can not be existed if the list price is set as coin
-        if !token_address.is_none(){
-            return Err(ContractError::WrongConfig {  })
-        }
     } else{
         //Validate Configuration, token_address can not be existed if the list price is set as coin
-        if token_address.clone().is_none(){
-            return Err(ContractError::WrongConfig {  })
-        }
-
         let token_address = token_address.unwrap();
         let token_denom = TOKENADDRESS.may_load(deps.storage, &token_address)?;
         match  token_denom{
@@ -543,6 +542,12 @@ fn execute_bid_with_coin(
     }
 
     let collection_info = collection_info.unwrap();
+
+    let is_registered_coin = COINDENOM.may_load(deps.storage, &list_price.denom)?;
+    if is_registered_coin.is_none(){
+      return Err(ContractError::WrongCoinDenom {  })
+    }
+
     //Coin Validation to check if the sent amount is the same as the list price
     let amount = info  
         .funds
@@ -643,6 +648,7 @@ fn execute_bid_with_coin(
             }
     
         }
+        
         SaleType::CollectionBid =>{
             let mut messages:Vec<CosmosMsg> = Vec::new();
             let bidder = info.sender.to_string();
@@ -1052,7 +1058,8 @@ pub fn execute_accept_bid(
         .add_attribute("seller", existing_ask.seller)
         .add_attribute("bidder", bidder)
         .add_attribute("denom", crr_bid.list_price.denom)
-        .add_attribute("amount", crr_bid.list_price.amount.to_string()))
+        .add_attribute("amount", crr_bid.list_price.amount.to_string())
+        .add_messages(messages))
 }
 
 /// Remove an existing collection bid (limit order)
@@ -1125,6 +1132,28 @@ pub fn execute_accept_collection_bid(
 
     let existing_ask = asks().may_load(deps.storage, ask_key.clone())?;
     asks().remove(deps.storage, ask_key)?;
+
+     //bid information for this token_id;
+    let existing_bids_token = query_bids(deps.as_ref(), nft_address.clone(), token_id.clone(), None, Some(MAX_QUERY_LIMIT))?;
+    //remove bids for this token_id
+    for bid in existing_bids_token.bids{
+        match bid.token_address{
+            Some(token_address) =>{
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
+                    contract_addr: token_address.clone(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer { 
+                        recipient: bid.bidder.clone(),
+                        amount: bid.list_price.amount })?,
+                    funds: vec![] }));
+            }   
+            None =>{
+                messages.push(CosmosMsg::Bank(BankMsg::Send {
+                    to_address: bid.bidder.clone(),
+                    amount: vec![Coin{denom: bid.list_price.denom, amount: bid.list_price.amount}] }));               
+            }
+        }
+        bids().remove(deps.storage, (nft_address.clone(), token_id.clone(), bid.bidder))?;                
+    }
 
     match existing_ask.clone(){
         Some(existing_ask) =>{
@@ -1282,16 +1311,32 @@ fn execute_token_address(
     let  state = CONFIG.load(deps.storage)?;
     deps.api.addr_validate(&address)?;
 
-     if info.sender.to_string() != state.owner{
+    if info.sender.to_string() != state.owner{
         return Err(ContractError::Unauthorized {});
     }
     
     TOKENADDRESS.save(deps.storage,&address,&symbol)?;
 
-    CONFIG.save(deps.storage, &state)?;
     Ok(Response::default())
 }
 
+
+fn execute_add_coin(
+    deps: DepsMut,
+    _env:Env,
+    info: MessageInfo,
+    symbol:String,
+) -> Result<Response, ContractError> {
+    let  state = CONFIG.load(deps.storage)?;
+
+    if info.sender.to_string() != state.owner{
+        return Err(ContractError::Unauthorized {});
+    }
+    
+    COINDENOM.save(deps.storage, &symbol, &true)?;
+    
+    Ok(Response::default())
+}
 
 fn execute_fix_nft(
     deps: DepsMut,
@@ -1469,6 +1514,50 @@ fn execute_bid_limit(
 }
 
 
+fn execute_withdraw_coin(
+    deps: DepsMut,
+    _env:Env,
+    info:MessageInfo,
+    token_amount: Uint128,
+    coin_amount: Uint128,
+    token_address: String,
+    coin_denom: String
+) -> Result<Response, ContractError> {
+
+    //Validation Check
+    let  state = CONFIG.load(deps.storage)?;
+    if state.owner != info.sender.to_string() {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let mut messages: Vec<CosmosMsg> = Vec::new();
+    if token_amount > Uint128::new(0){
+      messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
+        contract_addr: token_address, 
+        msg: to_binary(&Cw20ExecuteMsg::Transfer { 
+          recipient: state.owner.clone(), 
+          amount: token_amount 
+        })?, 
+        funds: vec![] 
+      }))
+    }
+
+    if coin_amount > Uint128::zero(){
+      messages.push(CosmosMsg::Bank(BankMsg::Send { 
+        to_address: state.owner, 
+        amount: vec![Coin{
+          denom: coin_denom,
+          amount: coin_amount
+        }] 
+      }))
+    }
+
+    Ok(Response::new()
+        .add_messages(messages)
+      )
+}
+
+
 fn store_ask(store: &mut dyn Storage, ask: &Ask) -> StdResult<()> {
     asks().save(store, ask_key(&ask.collection, &ask.token_id), ask)
 }
@@ -1540,7 +1629,7 @@ fn distribute_money(
         let members = MEMBERS.load(deps.storage,&nft_address)?;
         let amount = list_price.amount;
         //Distribute money to the admins
-        if !token_address.is_none(){
+        if token_address.is_none(){
             for user in members{
                 messages.push(CosmosMsg::Bank(BankMsg::Send {
                         to_address: user.address,
@@ -1561,6 +1650,26 @@ fn distribute_money(
                     }]
                 })
             );
+       }else{
+          let token_address = token_address.unwrap();
+           for user in members{
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
+                  contract_addr: token_address.clone(), 
+                  msg: to_binary(&Cw20ExecuteMsg::Transfer { 
+                    recipient: user.address, 
+                    amount: amount*royalty_portion*user.portion 
+                  })?, 
+                  funds: vec![] }))
+            }
+            
+            messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
+                  contract_addr: token_address, 
+                  msg: to_binary(&Cw20ExecuteMsg::Transfer { 
+                    recipient: seller, 
+                    amount: amount*(Decimal::one()-royalty_portion)
+                  })?, 
+                  funds: vec![] }));
+                //Send money to asker
        }
             
         //Transfer NFT to bidder
