@@ -13,7 +13,8 @@ pub const TVL:Map<(&str,&str),Uint128> = Map::new("tvl_config");
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
     pub owner: String,
-    pub bid_limit: u32
+    pub bid_limit: u32,
+    pub admin: String
 }
 
 
@@ -163,6 +164,8 @@ pub fn sale_history_key(collection: &String, token_id: &String, time: u64) -> Sa
 pub struct SaleHistoryIndicies<'a> {
     pub collection: MultiIndex<'a, String, SaleInfo, SaleHistoryKey>,
     pub collection_token_id: MultiIndex<'a, (String, String), SaleInfo, SaleHistoryKey>,
+    pub buyer: MultiIndex<'a, String, SaleInfo, SaleHistoryKey>,
+    pub seller: MultiIndex<'a, String, SaleInfo, SaleHistoryKey>
 }
 
 impl<'a> IndexList<SaleInfo> for SaleHistoryIndicies<'a> {
@@ -170,6 +173,8 @@ impl<'a> IndexList<SaleInfo> for SaleHistoryIndicies<'a> {
         let v: Vec<&dyn Index<SaleInfo>> = vec![
             &self.collection,
             &self.collection_token_id,
+            &self.buyer,
+            &self.seller
         ];
         Box::new(v.into_iter())
     }
@@ -183,6 +188,16 @@ pub fn sale_history<'a>() -> IndexedMap<'a, SaleHistoryKey, SaleInfo, SaleHistor
             "sale_history",
             "sale_history__collection_token_id",
         ),
+        buyer: MultiIndex::new(
+            |d: &SaleInfo| d.to.clone(),
+            "sale_history",
+            "sale_history__buyer",
+        ),
+        seller: MultiIndex::new(
+            |d: &SaleInfo| d.from.clone(),
+            "sale_history",
+            "sale_history__seller",
+        )
     };
     IndexedMap::new("sale_history", indexes)
 }

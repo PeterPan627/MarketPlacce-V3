@@ -1,5 +1,5 @@
 use crate::msg::{
-    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid, SaleHistoryOffset, SaleHistroyResponse, TvlResponse, TvlIndividualResponse, CollectionBidOffset, CollectionBidResponse, CollectionBidsResponse
+    AskCountResponse,  AskResponse, AsksResponse,  BidResponse, BidsResponse,CollectionOffset, QueryMsg, CollectionOffsetBid, SaleHistoryOffset, SaleHistroyResponse, TvlResponse, TvlIndividualResponse, CollectionBidOffset, CollectionBidResponse, CollectionBidsResponse, SaleHistoryOffsetByUser
 };
 use crate::state::{
     ask_key, asks, bid_key, bids,  BidKey, State, CONFIG, CollectionInfo, COLLECTIONINFO, MEMBERS, UserInfo, sale_history_key, sale_history, tvl,collection_bid_key,collection_bids
@@ -186,7 +186,27 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
           deps,
           collection,
           denom
-        )?) 
+        )?),
+        QueryMsg::GetSaleHistoryByBuyer { 
+          buyer, 
+          start_after, 
+          limit 
+        } => to_binary(&query_sale_history_by_buyer(
+          deps,
+          buyer,
+          start_after,
+          limit
+        )?),
+        QueryMsg::GetSaleHistoryBySeller { 
+          seller, 
+          start_after, 
+          limit 
+        } => to_binary(&query_sale_history_by_seller(
+          deps,
+          seller,
+          start_after,
+          limit
+        )?)  
     }
 }
 
@@ -501,6 +521,68 @@ pub fn query_sale_history_by_token_id(
         .collect::<StdResult<Vec<_>>>()?;
 
     Ok(SaleHistroyResponse { sale_history })
+}
+
+
+pub fn query_sale_history_by_buyer(
+    deps: Deps,
+    buyer: String,
+    start_after: Option<SaleHistoryOffsetByUser>,
+    limit: Option<u32>,
+) -> StdResult<SaleHistroyResponse> {
+   let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let start = if let Some(start) = start_after {
+        Some(Bound::exclusive(sale_history_key(
+            &start.collection,
+            &start.token_id,
+            start.time,
+        )))
+    } else {
+        None
+    };
+
+    let sale_history = sale_history()
+        .idx
+        .buyer
+        .prefix(buyer)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(SaleHistroyResponse {  sale_history })
+}
+
+
+pub fn query_sale_history_by_seller(
+    deps: Deps,
+    seller: String,
+    start_after: Option<SaleHistoryOffsetByUser>,
+    limit: Option<u32>,
+) -> StdResult<SaleHistroyResponse> {
+   let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+
+    let start = if let Some(start) = start_after {
+        Some(Bound::exclusive(sale_history_key(
+            &start.collection,
+            &start.token_id,
+            start.time,
+        )))
+    } else {
+        None
+    };
+
+    let sale_history = sale_history()
+        .idx
+        .seller
+        .prefix(seller)
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| item.map(|(_, b)| b))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    Ok(SaleHistroyResponse {  sale_history })
 }
 
 

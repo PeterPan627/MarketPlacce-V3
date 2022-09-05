@@ -34,7 +34,8 @@ pub fn instantiate(
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     let state = State {
         owner:msg.owner,
-        bid_limit: 10
+        bid_limit: 10,
+        admin: msg.admin
     };
     CONFIG.save(deps.storage,&state)?;
     Ok(Response::default())
@@ -156,6 +157,14 @@ pub fn execute(
             env,
             info,
             address),
+        ExecuteMsg::ChangeAdmin { 
+          address 
+        } => execute_change_admin(
+          deps,
+          env,
+          info,
+          address
+        ),
         ExecuteMsg::AddCollection { 
             royalty_portion, 
             members,
@@ -515,7 +524,8 @@ fn execute_receive(
             
             Ok(Response::new()
                 .add_attribute("action", "buy Nft as fixed price with token")
-                .add_attribute("bidder", bidder))
+                .add_attribute("bidder", bidder)
+                .add_messages(messages))
         }
     }
 
@@ -786,7 +796,8 @@ fn execute_bid_with_coin(
             
             Ok(Response::new()
                 .add_attribute("action", "buy Nft as fixed price with coin")
-                .add_attribute("bidder", bidder))
+                .add_attribute("bidder", bidder)
+                .add_messages(messages))
         }
     }
 
@@ -1405,11 +1416,29 @@ fn execute_change_owner(
 ) -> Result<Response, ContractError> {
     let mut state = CONFIG.load(deps.storage)?;
 
-    if state.owner != info.sender.to_string() {
+    if state.admin != info.sender.to_string() {
         return Err(ContractError::Unauthorized {});
     }
     deps.api.addr_validate(&address)?;
     state.owner = address;
+    CONFIG.save(deps.storage,&state)?;
+    Ok(Response::default())
+}
+
+
+fn execute_change_admin(
+    deps: DepsMut,
+    _env:Env,
+    info: MessageInfo,
+    address: String,
+) -> Result<Response, ContractError> {
+    let mut state = CONFIG.load(deps.storage)?;
+
+    if state.admin != info.sender.to_string() {
+        return Err(ContractError::Unauthorized {});
+    }
+    deps.api.addr_validate(&address)?;
+    state.admin = address;
     CONFIG.save(deps.storage,&state)?;
     Ok(Response::default())
 }

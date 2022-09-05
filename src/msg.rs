@@ -10,7 +10,8 @@ use cw721::Cw721ReceiveMsg;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-  pub owner: String
+  pub owner: String,
+  pub admin: String
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -99,7 +100,11 @@ pub enum ExecuteMsg {
         coin_amount: Uint128,
         token_address: String,
         coin_denom: String
-    }
+    },
+    ChangeAdmin{
+        address:String
+    },
+    
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -219,6 +224,16 @@ pub enum QueryMsg {
     GetTvlIndividaul{
         collection:String,
         denom:String
+    },
+    GetSaleHistoryBySeller{
+        seller: String,
+        start_after: Option<SaleHistoryOffsetByUser>,
+        limit: Option<u32>
+    },
+    GetSaleHistoryByBuyer{
+        buyer: String,
+        start_after: Option<SaleHistoryOffsetByUser>,
+        limit: Option<u32>
     }
 }
 
@@ -265,6 +280,13 @@ pub struct SaleHistoryOffset {
     pub time: u64
 }
 
+/// Salehistory offset for the pagination sale histroy by collection
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct SaleHistoryOffsetByUser {
+    pub collection:String,
+    pub token_id: String,
+    pub time: u64
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct SellNft {
