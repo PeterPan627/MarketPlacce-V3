@@ -688,14 +688,14 @@ fn accept_bid() {
     "ujuno".to_string(), 
     Uint128::new(10000), 
     None, 
-    "Hope.1".to_string()
+    "Hope.5".to_string()
   );
 
   let _result = bid_nft_with_token(
     deps.as_mut(),
     env.clone(), 
     "collection1".to_string(),
-    Some("Hope.1".to_string()),
+    Some("Hope.5".to_string()),
     "hope_address",
     "bider1".to_string(),
     Uint128::new(5000)
@@ -703,18 +703,22 @@ fn accept_bid() {
 
 
   let info = mock_info("seller1",&[]);
-  let msg = ExecuteMsg::AcceptBid { nft_address: "collection1".to_string(), token_id: "Hope.1".to_string(), bidder: "bider1".to_string() };
+  let msg = ExecuteMsg::AcceptBid { nft_address: "collection1".to_string(), token_id: "Hope.5".to_string(), bidder: "bider1".to_string() };
   let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
   let tvl = query_tvl_by_collection(deps.as_ref(), "collection1".to_string(), None, Some(30)).unwrap();
   println!("{:?}",tvl);
   let _tvl = query_tvl_by_denom(deps.as_ref(), "hope".to_string(), None, Some(20)).unwrap();
 
-  let  sale_history_by_token_id = query_sale_history_by_token_id(deps.as_ref(), "collection1".to_string(), "Hope.1".to_string(), None, Some(20)).unwrap();
-  println!("{:?}", sale_history_by_token_id);
+  let  sale_history = query_sale_history_by_seller(deps.as_ref(), "seller1".to_string(), Some(SaleHistoryOffsetByUser{
+    collection:"collection1".to_string(),
+    token_id:"Hope.1".to_string(),
+    time:1571797419
+  }), Some(20)).unwrap();
+  println!("{:?}", sale_history);
 
-  let asks = query_asks(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
-  println!("{:?}",asks)
+  // let asks = query_asks(deps.as_ref(), "collection1".to_string(), None, Some(20)).unwrap();
+  // println!("{:?}",asks)
 }
 
 #[test]

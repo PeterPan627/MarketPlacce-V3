@@ -1119,7 +1119,6 @@ pub fn execute_remove_collection_bid(
         .add_attribute("collection", nft_address)
         .add_attribute("bidder", bidder))
 }
-
 /// Owner/seller of an item in a collection can accept a collection bid which transfers funds as well as a token
 pub fn execute_accept_collection_bid(
     deps: DepsMut,
@@ -1151,95 +1150,131 @@ pub fn execute_accept_collection_bid(
     collection_bids().remove(deps.storage, bid_key)?;
 
     let existing_ask = asks().may_load(deps.storage, ask_key.clone())?;
-    asks().remove(deps.storage, ask_key)?;
-
-     //bid information for this token_id;
-    let existing_bids_token = query_bids(deps.as_ref(), nft_address.clone(), token_id.clone(), None, Some(MAX_QUERY_LIMIT))?;
-    //remove bids for this token_id
-    for bid in existing_bids_token.bids{
-        match bid.token_address{
-            Some(token_address) =>{
-                messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
-                    contract_addr: token_address.clone(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer { 
-                        recipient: bid.bidder.clone(),
-                        amount: bid.list_price.amount })?,
-                    funds: vec![] }));
-            }   
-            None =>{
-                messages.push(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: bid.bidder.clone(),
-                    amount: vec![Coin{denom: bid.list_price.denom, amount: bid.list_price.amount}] }));               
-            }
-        }
-        bids().remove(deps.storage, (nft_address.clone(), token_id.clone(), bid.bidder))?;                
-    }
-
+    
     match existing_ask.clone(){
         Some(existing_ask) =>{
+            asks().remove(deps.storage, ask_key)?;
             if existing_ask.seller != sender{
                 return Err(ContractError::Unauthorized {  });
             }
             if existing_ask.is_expired(&env.block){
               return Err(ContractError::AskExpired {  })
             }
-        },
-        None =>{
-            return Err(ContractError::NoSuchAsk {  })
-        }
-    }
-
-    let existing_ask = existing_ask.unwrap();
-
-    update_sale_history_tvl(
-        deps.storage, 
-        env, 
-        info, 
-        existing_ask.seller.clone(), 
-        bidder.clone(), 
-        nft_address.clone(), 
-        token_id.clone(), 
-        bid.list_price.clone()
-    )?;
-
-    match bid.token_address {
-        Some(token_address) =>{
-            distribute_money(
-                deps.as_ref(), 
-                nft_address,
-                collection_info.royalty_portion, 
+             //bid information for this token_id;
+            let existing_bids_token = query_bids(deps.as_ref(), nft_address.clone(), token_id.clone(), None, Some(MAX_QUERY_LIMIT))?;
+            //remove bids for this token_id
+            for each_bid in existing_bids_token.bids{
+                match each_bid.token_address{
+                    Some(token_address) =>{
+                        messages.push(CosmosMsg::Wasm(WasmMsg::Execute { 
+                            contract_addr: token_address.clone(),
+                            msg: to_binary(&Cw20ExecuteMsg::Transfer { 
+                                recipient: each_bid.bidder.clone(),
+                                amount: each_bid.list_price.amount })?,
+                            funds: vec![] }));
+                    }   
+                    None =>{
+                        messages.push(CosmosMsg::Bank(BankMsg::Send {
+                            to_address: each_bid.bidder.clone(),
+                            amount: vec![Coin{denom: each_bid.list_price.denom, amount: each_bid.list_price.amount}] }));               
+                    }
+                }
+                bids().remove(deps.storage, (nft_address.clone(), token_id.clone(), each_bid.bidder))?;                
+            }
+            
+            update_sale_history_tvl(
+                deps.storage, 
+                env, 
+                info, 
                 existing_ask.seller.clone(), 
                 bidder.clone(), 
-                bid.list_price.clone(), 
-                Some(token_address), 
-                token_id, 
-                &mut messages
-            )?;        
+                nft_address.clone(), 
+                token_id.clone(), 
+                bid.list_price.clone()
+            )?;
+
+            match bid.token_address {
+                Some(token_address) =>{
+                    distribute_money(
+                        deps.as_ref(), 
+                        nft_address,
+                        collection_info.royalty_portion, 
+                        existing_ask.seller.clone(), 
+                        bidder.clone(), 
+                        bid.list_price.clone(), 
+                        Some(token_address), 
+                        token_id, 
+                        &mut messages
+                    )?;        
+                },
+                None =>{
+                    distribute_money(
+                        deps.as_ref(), 
+                        nft_address,
+                        collection_info.royalty_portion, 
+                        existing_ask.seller.clone(), 
+                        bidder.clone(), 
+                        bid.list_price.clone(), 
+                        None, 
+                        token_id, 
+                        &mut messages
+                    )?;   
+                }
+            }
+
+
         },
         None =>{
-             distribute_money(
-                deps.as_ref(), 
-                nft_address,
-                collection_info.royalty_portion, 
-                existing_ask.seller.clone(), 
+            update_sale_history_tvl(
+                deps.storage, 
+                env, 
+                info, 
+                sender.clone(), 
                 bidder.clone(), 
-                bid.list_price.clone(), 
-                None, 
-                token_id, 
-                &mut messages
-            )?;   
+                nft_address.clone(), 
+                token_id.clone(), 
+                bid.list_price.clone()
+            )?;
+
+            match bid.token_address {
+                Some(token_address) =>{
+                    distribute_money(
+                        deps.as_ref(), 
+                        nft_address,
+                        collection_info.royalty_portion, 
+                        sender.clone(), 
+                        bidder.clone(), 
+                        bid.list_price.clone(), 
+                        Some(token_address), 
+                        token_id, 
+                        &mut messages
+                    )?;        
+                },
+                None =>{
+                    distribute_money(
+                        deps.as_ref(), 
+                        nft_address,
+                        collection_info.royalty_portion, 
+                        sender.clone(), 
+                        bidder.clone(), 
+                        bid.list_price.clone(), 
+                        None, 
+                        token_id, 
+                        &mut messages
+                    )?;   
+                }
+            }
         }
     }
-
 
     Ok(Response::new()
         .add_attribute("action", "accept collection bid")
-        .add_attribute("seller", existing_ask.seller)
         .add_attribute("bidder", bidder)
         .add_attribute("denom", bid.list_price.denom)
         .add_attribute("amount", bid.list_price.amount.to_string())
         .add_messages(messages))
 }
+
 
 
 fn execute_add_collection(
